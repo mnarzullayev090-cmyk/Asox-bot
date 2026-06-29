@@ -1,7 +1,10 @@
+import os
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-TOKEN = "***REMOVED_LEAKED_TOKEN***"
+load_dotenv()
+TOKEN = os.getenv("BOT_TOKEN")
 
 TEXTS = {
     "uz": {
@@ -22,6 +25,43 @@ TEXTS = {
             "📲 Ilovani yuklab oling va birinchi buyurtmaga chegirma oling!"
         ),
         "catalog_title": "📦 *Mahsulotlar katalogi*\n\nKategoriyani tanlang:",
+        "clothes_title": (
+            "👕 *Kiyimlar*\n\n"
+            "O'z dizayningiz bilan bezatilgan kiyimlar:\n\n"
+            "👕 T-shirt\n"
+            "🧥 Hoodie\n"
+            "🥻 Polo ko'ylak\n"
+            "🩳 Shorts\n"
+            "🧦 Paypoq\n"
+            "🧤 Qo'lqop\n"
+            "🏃 Sport kiyim\n"
+            "🎽 Forma\n\n"
+            "🌐 Batafsil ma'lumot uchun saytga o'ting:"
+        ),
+        "gifts_title": (
+            "🎁 *Sovg'alar*\n\n"
+            "Yaqinlaringizga maxsus sovg'alar:\n\n"
+            "☕ Krujka\n"
+            "🧴 Termos\n"
+            "🛏 Yostiq\n"
+            "🖼 Poster\n"
+            "🖼 Canvas\n"
+            "🗓 Kalendar\n"
+            "📒 Daftar\n"
+            "🎀 Sovg'a to'plami\n\n"
+            "🌐 Batafsil ma'lumot uchun saytga o'ting:"
+        ),
+        "accessories_title": (
+            "📱 *Aksessuarlar*\n\n"
+            "Shaxsiy dizaynli aksessuarlar:\n\n"
+            "📱 Telefon qopqog'i\n"
+            "🎒 Ryukzak\n"
+            "👜 Sumka\n"
+            "🧢 Kepka\n"
+            "⌚ Soat qayishi\n"
+            "🖱 Sichqoncha gilami\n\n"
+            "🌐 Batafsil ma'lumot uchun saytga o'ting:"
+        ),
         "design_title": (
             "🎨 *Dizayn mahsulotlari*\n\n"
             "O'z rasmingiz yoki logotipingizni quyidagi mahsulotlarga joylashtiring:\n\n"
@@ -60,6 +100,9 @@ TEXTS = {
         "btn_catalog": "📦 Mahsulotlar katalogi",
         "btn_contact": "📞 Aloqa",
         "btn_site": "🌐 Saytga o'tish",
+        "btn_clothes": "👕 Kiyimlar",
+        "btn_gifts": "🎁 Sovg'alar",
+        "btn_accessories": "📱 Aksessuarlar",
         "btn_design": "🎨 Dizayn mahsulotlari",
         "btn_print": "🖨 Print xizmatlari",
         "btn_back": "⬅️ Orqaga",
@@ -84,6 +127,43 @@ TEXTS = {
             "📲 Скачайте приложение и получите скидку на первый заказ!"
         ),
         "catalog_title": "📦 *Каталог товаров*\n\nВыберите категорию:",
+        "clothes_title": (
+            "👕 *Одежда*\n\n"
+            "Одежда с вашим уникальным дизайном:\n\n"
+            "👕 Футболка\n"
+            "🧥 Худи\n"
+            "🥻 Поло\n"
+            "🩳 Шорты\n"
+            "🧦 Носки\n"
+            "🧤 Перчатки\n"
+            "🏃 Спортивная одежда\n"
+            "🎽 Форма\n\n"
+            "🌐 Перейдите на сайт для подробной информации:"
+        ),
+        "gifts_title": (
+            "🎁 *Подарки*\n\n"
+            "Особенные подарки для близких:\n\n"
+            "☕ Кружка\n"
+            "🧴 Термос\n"
+            "🛏 Подушка\n"
+            "🖼 Постер\n"
+            "🖼 Холст\n"
+            "🗓 Календарь\n"
+            "📒 Блокнот\n"
+            "🎀 Подарочный набор\n\n"
+            "🌐 Перейдите на сайт для подробной информации:"
+        ),
+        "accessories_title": (
+            "📱 *Аксессуары*\n\n"
+            "Аксессуары с персональным дизайном:\n\n"
+            "📱 Чехол для телефона\n"
+            "🎒 Рюкзак\n"
+            "👜 Сумка\n"
+            "🧢 Кепка\n"
+            "⌚ Ремешок для часов\n"
+            "🖱 Коврик для мыши\n\n"
+            "🌐 Перейдите на сайт для подробной информации:"
+        ),
         "design_title": (
             "🎨 *Дизайн товары*\n\n"
             "Разместите своё изображение или логотип на следующих товарах:\n\n"
@@ -122,6 +202,9 @@ TEXTS = {
         "btn_catalog": "📦 Каталог товаров",
         "btn_contact": "📞 Контакты",
         "btn_site": "🌐 Перейти на сайт",
+        "btn_clothes": "👕 Одежда",
+        "btn_gifts": "🎁 Подарки",
+        "btn_accessories": "📱 Аксессуары",
         "btn_design": "🎨 Дизайн товары",
         "btn_print": "🖨 Услуги печати",
         "btn_back": "⬅️ Назад",
@@ -149,6 +232,9 @@ def main_menu(lang):
 def catalog_menu(lang):
     t = TEXTS[lang]
     keyboard = [
+        [InlineKeyboardButton(t["btn_clothes"], callback_data="clothes")],
+        [InlineKeyboardButton(t["btn_gifts"], callback_data="gifts")],
+        [InlineKeyboardButton(t["btn_accessories"], callback_data="accessories")],
         [InlineKeyboardButton(t["btn_design"], callback_data="design")],
         [InlineKeyboardButton(t["btn_print"], callback_data="print")],
         [InlineKeyboardButton(t["btn_back"], callback_data="back")],
@@ -190,6 +276,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(t["about"], parse_mode="Markdown", reply_markup=back_to_main(lang))
     elif data == "catalog":
         await query.edit_message_text(t["catalog_title"], parse_mode="Markdown", reply_markup=catalog_menu(lang))
+    elif data == "clothes":
+        await query.edit_message_text(t["clothes_title"], parse_mode="Markdown", reply_markup=back_menu(lang))
+    elif data == "gifts":
+        await query.edit_message_text(t["gifts_title"], parse_mode="Markdown", reply_markup=back_menu(lang))
+    elif data == "accessories":
+        await query.edit_message_text(t["accessories_title"], parse_mode="Markdown", reply_markup=back_menu(lang))
     elif data == "design":
         await query.edit_message_text(t["design_title"], parse_mode="Markdown", reply_markup=back_menu(lang))
     elif data == "print":

@@ -155,8 +155,11 @@ TEXTS = {
             "Qanday mahsulot olmoqchi ekanligingizni batafsil yozing:\n"
             "_(Masalan: rang, o'lcham, miqdor, maxsus talab va hokazo)_"
         ),
-        "izoh_done": "✅ *Izohingiz qabul qilindi!*\n\nTez orada mutaxassislarimiz siz bilan bog'lanadi.",
+        "izoh_done": "✅ *Izohingiz qabul qilindi!*",
         "izoh_cancel_btn": "❌ Bekor qilish",
+        "izoh_skip_btn": "⏭ Izoh kerak emas",
+        "narx_prompt": "💰 *Dizayningizga qancha narx bera olasiz?*\n\n_(Masalan: 50 000 so'm, 100 000 so'm)_",
+        "narx_done": "✅ *Rahmat! Ma'lumotlaringiz qabul qilindi.*\n\nTez orada mutaxassislarimiz siz bilan bog'lanadi!",
         "lang_changed": "✅ Til o'zgartirildi!",
         "design_custom_title": (
             "🎨 *O'z dizayningizni joylashtiring*\n\n"
@@ -292,8 +295,11 @@ TEXTS = {
             "Опишите подробно, какой товар вы хотите:\n"
             "_(Например: цвет, размер, количество, особые требования и т.д.)_"
         ),
-        "izoh_done": "✅ *Ваш комментарий принят!*\n\nНаши специалисты свяжутся с вами в ближайшее время.",
+        "izoh_done": "✅ *Ваш комментарий принят!*",
         "izoh_cancel_btn": "❌ Отмена",
+        "izoh_skip_btn": "⏭ Без комментария",
+        "narx_prompt": "💰 *Сколько вы готовы заплатить за дизайн?*\n\n_(Например: 50 000 сум, 100 000 сум)_",
+        "narx_done": "✅ *Спасибо! Ваша информация принята.*\n\nНаши специалисты свяжутся с вами в ближайшее время!",
         "lang_changed": "✅ Язык изменён!",
         "design_custom_title": (
             "🎨 *Разместите свой дизайн*\n\n"
@@ -358,7 +364,6 @@ def main_menu(lang):
         [InlineKeyboardButton(t["btn_contact"], callback_data="contact")],
         [InlineKeyboardButton(t["btn_site"], url="https://asox.uz/")],
         [InlineKeyboardButton(t["btn_lang"], callback_data="lang")],
-        [InlineKeyboardButton(t["btn_izoh"], callback_data="izoh")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -584,7 +589,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif data == "izoh_cancel":
         context.user_data.pop("awaiting_izoh", None)
+        context.user_data.pop("pending_photos", None)
+        context.user_data.pop("pending_products", None)
+        context.user_data.pop("pending_user", None)
         await edit_msg(query, t["welcome"], main_menu(lang))
+    elif data == "izoh_skip":
+        context.user_data.pop("awaiting_izoh", None)
+        context.user_data["saved_izoh"] = ""
+        context.user_data["awaiting_narx"] = True
+        await query.message.reply_text(t["narx_prompt"], parse_mode="Markdown")
     elif data == "design_cancel":
         context.user_data.pop("awaiting_design", None)
         context.user_data.pop("design_product", None)
@@ -622,12 +635,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "back":
         await edit_msg(query, t["welcome"], main_menu(lang))
 
-async def _send_to_admin(file_id, product, user, context):
+async def _send_to_admin(file_id, product, user, context, izoh="", narx=""):
     reg_name = context.user_data.get("name", "")
     reg_phone = context.user_data.get("phone", "")
     name_line = reg_name if reg_name else (user.full_name or "")
     username = f"@{user.username}" if user.username else "username yo'q"
     phone_line = f"\n📞 Telefon: {reg_phone}" if reg_phone else ""
+    izoh_line = f"\n📝 Izoh: {izoh}" if izoh else ""
+    narx_line = f"\n💰 Narx taklifi: {narx}" if narx else ""
 
     admin_text = (
         f"🎨 *Yangi dizayn so'rovi!*\n\n"
@@ -635,8 +650,9 @@ async def _send_to_admin(file_id, product, user, context):
         f"💬 Telegram: {username}\n"
         f"🆔 ID: `{user.id}`"
         f"{phone_line}\n\n"
-        f"🛍 Mahsulot: *{product}*\n"
-        f"📸 Foydalanuvchi dizayn yubordi!"
+        f"🛍 Mahsulot: *{product}*"
+        f"{izoh_line}"
+        f"{narx_line}"
     )
     print(f"[DIZAYN] {user.id} → {product}")
     try:
@@ -665,23 +681,28 @@ async def _send_to_admin(file_id, product, user, context):
             print(f"[DIZAYN] Admin {admin_id} xato: {e}")
 
 async def _process_photos_final(chat_id, user, context, photos, products):
-    for file_id, product in zip(photos, products):
-        await _send_to_admin(file_id, product, user, context)
     lang = get_lang(user.id)
+    # Rasmlar va mahsulotlarni saqlaymiz, hali adminga yubormaymiz
+    context.user_data["pending_photos"] = list(photos)
+    context.user_data["pending_products"] = list(products)
+    context.user_data["pending_user"] = user
     context.user_data.pop("awaiting_design", None)
     context.user_data.pop("design_photos", None)
     context.user_data.pop("design_products", None)
     context.user_data.pop("choosing_per_photo", None)
     context.user_data.pop("design_current_idx", None)
     context.user_data.pop("awaiting_design_confirm", None)
-    done_text = (
-        "✅ *Rahmat! Dizayn(lar) qabul qilindi.*\n\n"
-        "🕐 Tez orada mutaxassislarimiz siz bilan bog'lanadi!"
-        if lang == "uz" else
-        "✅ *Спасибо! Дизайн(ы) приняты.*\n\n"
-        "🕐 Наши специалисты свяжутся с вами в ближайшее время!"
+    t = TEXTS[lang]
+    context.user_data["awaiting_izoh"] = True
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=t["izoh_prompt"],
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(t["izoh_cancel_btn"], callback_data="izoh_cancel")],
+            [InlineKeyboardButton(t["izoh_skip_btn"], callback_data="izoh_skip")],
+        ])
     )
-    await context.bot.send_message(chat_id=chat_id, text=done_text, parse_mode="Markdown")
 
 async def _delayed_process(chat_id, user_id, user, context):
     await asyncio.sleep(2.5)
@@ -736,35 +757,38 @@ async def izoh_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     lang = get_lang(user.id)
     t = TEXTS[lang]
-    izoh_text = update.message.text
-
-    reg_name = context.user_data.get("name", "")
-    reg_phone = context.user_data.get("phone", "")
-    name_line = reg_name if reg_name else (user.full_name or "")
-    username = f"@{user.username}" if user.username else "username yo'q"
-    phone_line = f"\n📞 Telefon: {reg_phone}" if reg_phone else ""
-
-    admin_text = (
-        f"📝 *Yangi izoh!*\n\n"
-        f"👤 Ism: {name_line}\n"
-        f"💬 Telegram: {username}\n"
-        f"🆔 ID: `{user.id}`"
-        f"{phone_line}\n\n"
-        f"💬 Izoh:\n{izoh_text}"
-    )
-    try:
-        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
-        for admin_id in ADMIN_IDS:
-            await http_session.post(url, json={
-                "chat_id": admin_id,
-                "text": admin_text,
-                "parse_mode": "Markdown"
-            })
-    except Exception as e:
-        print(f"Izoh yuborishda xato: {e}")
-
+    context.user_data["saved_izoh"] = update.message.text
     context.user_data.pop("awaiting_izoh", None)
-    await update.message.reply_text(t["izoh_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
+    context.user_data["awaiting_narx"] = True
+    await update.message.reply_text(t["narx_prompt"], parse_mode="Markdown")
+
+async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("awaiting_narx"):
+        await narx_received(update, context)
+    elif context.user_data.get("awaiting_izoh"):
+        await izoh_received(update, context)
+
+async def narx_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_narx"):
+        return
+    user = update.effective_user
+    lang = get_lang(user.id)
+    t = TEXTS[lang]
+    narx_text = update.message.text
+    izoh_text = context.user_data.get("saved_izoh", "")
+
+    photos = context.user_data.get("pending_photos", [])
+    products = context.user_data.get("pending_products", [])
+
+    for file_id, product in zip(photos, products):
+        await _send_to_admin(file_id, product, user, context, izoh=izoh_text, narx=narx_text)
+
+    context.user_data.pop("awaiting_narx", None)
+    context.user_data.pop("saved_izoh", None)
+    context.user_data.pop("pending_photos", None)
+    context.user_data.pop("pending_products", None)
+    context.user_data.pop("pending_user", None)
+    await update.message.reply_text(t["narx_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
@@ -813,7 +837,7 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, design_photo_received))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, izoh_received))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("xabar", broadcast))
     app.add_handler(CallbackQueryHandler(button))

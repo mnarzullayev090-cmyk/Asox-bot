@@ -149,6 +149,14 @@ TEXTS = {
         "btn_print": "🖨 Print xizmatlari",
         "btn_back": "⬅️ Orqaga",
         "btn_lang": "🌐 Tilni o'zgartirish | Сменить язык",
+        "btn_izoh": "📝 Izoh qo'shish",
+        "izoh_prompt": (
+            "📝 *Izoh yoki qo'shimcha ma'lumot*\n\n"
+            "Qanday mahsulot olmoqchi ekanligingizni batafsil yozing:\n"
+            "_(Masalan: rang, o'lcham, miqdor, maxsus talab va hokazo)_"
+        ),
+        "izoh_done": "✅ *Izohingiz qabul qilindi!*\n\nTez orada mutaxassislarimiz siz bilan bog'lanadi.",
+        "izoh_cancel_btn": "❌ Bekor qilish",
         "lang_changed": "✅ Til o'zgartirildi!",
         "design_custom_title": (
             "🎨 *O'z dizayningizni joylashtiring*\n\n"
@@ -278,6 +286,14 @@ TEXTS = {
         "btn_print": "🖨 Услуги печати",
         "btn_back": "⬅️ Назад",
         "btn_lang": "🌐 Tilni o'zgartirish | Сменить язык",
+        "btn_izoh": "📝 Оставить комментарий",
+        "izoh_prompt": (
+            "📝 *Комментарий или дополнительная информация*\n\n"
+            "Опишите подробно, какой товар вы хотите:\n"
+            "_(Например: цвет, размер, количество, особые требования и т.д.)_"
+        ),
+        "izoh_done": "✅ *Ваш комментарий принят!*\n\nНаши специалисты свяжутся с вами в ближайшее время.",
+        "izoh_cancel_btn": "❌ Отмена",
         "lang_changed": "✅ Язык изменён!",
         "design_custom_title": (
             "🎨 *Разместите свой дизайн*\n\n"
@@ -342,6 +358,7 @@ def main_menu(lang):
         [InlineKeyboardButton(t["btn_contact"], callback_data="contact")],
         [InlineKeyboardButton(t["btn_site"], url="https://asox.uz/")],
         [InlineKeyboardButton(t["btn_lang"], callback_data="lang")],
+        [InlineKeyboardButton(t["btn_izoh"], callback_data="izoh")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -555,6 +572,19 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=design_products_menu(lang),
         )
+    elif data == "izoh":
+        context.user_data["awaiting_izoh"] = True
+        cancel_markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton(t["izoh_cancel_btn"], callback_data="izoh_cancel")
+        ]])
+        await query.message.reply_text(
+            t["izoh_prompt"],
+            parse_mode="Markdown",
+            reply_markup=cancel_markup,
+        )
+    elif data == "izoh_cancel":
+        context.user_data.pop("awaiting_izoh", None)
+        await edit_msg(query, t["welcome"], main_menu(lang))
     elif data == "design_cancel":
         context.user_data.pop("awaiting_design", None)
         context.user_data.pop("design_product", None)
@@ -700,6 +730,42 @@ async def design_photo_received(update: Update, context: ContextTypes.DEFAULT_TY
         task = asyncio.create_task(_delayed_process(chat_id, user.id, user, context))
         context.user_data["_photo_task"] = task
 
+async def izoh_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_izoh"):
+        return
+    user = update.effective_user
+    lang = get_lang(user.id)
+    t = TEXTS[lang]
+    izoh_text = update.message.text
+
+    reg_name = context.user_data.get("name", "")
+    reg_phone = context.user_data.get("phone", "")
+    name_line = reg_name if reg_name else (user.full_name or "")
+    username = f"@{user.username}" if user.username else "username yo'q"
+    phone_line = f"\n📞 Telefon: {reg_phone}" if reg_phone else ""
+
+    admin_text = (
+        f"📝 *Yangi izoh!*\n\n"
+        f"👤 Ism: {name_line}\n"
+        f"💬 Telegram: {username}\n"
+        f"🆔 ID: `{user.id}`"
+        f"{phone_line}\n\n"
+        f"💬 Izoh:\n{izoh_text}"
+    )
+    try:
+        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
+        for admin_id in ADMIN_IDS:
+            await http_session.post(url, json={
+                "chat_id": admin_id,
+                "text": admin_text,
+                "parse_mode": "Markdown"
+            })
+    except Exception as e:
+        print(f"Izoh yuborishda xato: {e}")
+
+    context.user_data.pop("awaiting_izoh", None)
+    await update.message.reply_text(t["izoh_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
+
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         await update.message.reply_text("⛔ Ruxsat yo'q.")
@@ -747,6 +813,7 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, design_photo_received))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, izoh_received))
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("xabar", broadcast))
     app.add_handler(CallbackQueryHandler(button))

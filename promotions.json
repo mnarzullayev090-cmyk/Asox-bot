@@ -1,0 +1,7 @@
+[
+  {"name": "T-shirt", "emoji": "👕", "discount": "20%", "end_date": "2026-07-31"},
+  {"name": "Hoodie", "emoji": "🧥", "discount": "15%", "end_date": "2026-07-31"},
+  {"name": "Krujka", "emoji": "☕", "discount": "2 ta olsang 1 tasi bepul", "end_date": "2026-07-31"},
+  {"name": "Ryukzak", "emoji": "🎒", "discount": "25%", "end_date": "2026-07-31"},
+  {"name": "Poster + Canvas", "emoji": "🖼", "discount": "To'plamda 30% arzon", "end_date": "2026-07-31"}
+]

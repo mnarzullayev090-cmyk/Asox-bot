@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from datetime import datetime, date
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
@@ -8,6 +9,59 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 import aiohttp
 
 USERS_FILE = "/home/muxa/users.json"
+PROMOTIONS_FILE = "/home/muxa/promotions.json"
+
+def load_promotions():
+    try:
+        with open(PROMOTIONS_FILE, "r") as f:
+            promos = json.load(f)
+        today = date.today()
+        active = [p for p in promos if date.fromisoformat(p["end_date"]) >= today]
+        if len(active) != len(promos):
+            save_promotions(active)
+        return active
+    except Exception:
+        return []
+
+def save_promotions(promos):
+    with open(PROMOTIONS_FILE, "w") as f:
+        json.dump(promos, f, ensure_ascii=False, indent=2)
+
+def build_aksiya_text(lang):
+    promos = load_promotions()
+    today = date.today()
+
+    if lang == "uz":
+        header = "🔥 *Aksiyalar va chegirmalar*\n\n🎉 Hozirgi maxsus takliflar:\n\n"
+        footer = "\n\n📲 Buyurtma berish uchun saytga o'ting:"
+        date_label = "⏳ *Aksiya tugash sanasi:* "
+        no_promos = "😔 Hozirda faol aksiyalar yo'q."
+    elif lang == "ru":
+        header = "🔥 *Акции и скидки*\n\n🎉 Текущие специальные предложения:\n\n"
+        footer = "\n\n📲 Перейдите на сайт для заказа:"
+        date_label = "⏳ *Акция до:* "
+        no_promos = "😔 Сейчас нет активных акций."
+    else:
+        header = "🔥 *Promotions and discounts*\n\n🎉 Current special offers:\n\n"
+        footer = "\n\n📲 Visit the website to order:"
+        date_label = "⏳ *Promotion until:* "
+        no_promos = "😔 No active promotions at the moment."
+
+    if not promos:
+        return no_promos
+
+    lines = []
+    grouped = {}
+    for p in promos:
+        end = p.get("end_date", "")
+        grouped.setdefault(end, []).append(p)
+
+    for end_date, items in grouped.items():
+        for p in items:
+            lines.append(f"{p['emoji']} *{p['name']}* — {p['discount']}")
+        lines.append(f"{date_label}{end_date}\n")
+
+    return header + "\n".join(lines) + footer
 
 def load_users():
     try:
@@ -18,7 +72,17 @@ def load_users():
 
 def save_user(user_id, name, phone):
     users = load_users()
-    users[str(user_id)] = {"name": name, "phone": phone}
+    existing = users.get(str(user_id), {})
+    users[str(user_id)] = {"name": name, "phone": phone, "lang": existing.get("lang", "uz")}
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, ensure_ascii=False)
+
+def save_lang(user_id, lang):
+    users = load_users()
+    if str(user_id) in users:
+        users[str(user_id)]["lang"] = lang
+    else:
+        users[str(user_id)] = {"name": "", "phone": "", "lang": lang}
     with open(USERS_FILE, "w") as f:
         json.dump(users, f, ensure_ascii=False)
 
@@ -136,7 +200,7 @@ TEXTS = {
             "▶️ YouTube: @asoxmarket\n"
             "🌐 Sayt: https://asox.uz/"
         ),
-        "btn_about": "🎨 O'z dizayningizni yarating",
+        "btn_about": "🎨 O'z dizayningizni baham ko'ring",
         "btn_design_add": "➕ Dizayn qo'shish",
         "btn_catalog": "📦 Mahsulotlar katalogi",
         "btn_aksiya": "🔥 Aksiyalar",
@@ -162,11 +226,61 @@ TEXTS = {
         "taklif_prompt": "💡 *Taklifingizni yozing*\n\nQanday mahsulot yoki xizmat qo'shishimizni xohlaysiz?",
         "taklif_done": "✅ *Taklifingiz qabul qilindi! Rahmat!*",
         "taklif_cancel_btn": "❌ Bekor qilish",
+        "btn_faq_ask": "✍️ Savol berish",
+        "faq_ask_prompt": "✍️ *Savolingizni yozing*\n\nMutaxassislarimiz tez orada javob beradi:",
+        "faq_ask_done": "✅ *Savolingiz qabul qilindi! Tez orada javob beramiz.*",
+        "faq_ask_cancel_btn": "❌ Bekor qilish",
         "narx_prompt": "💰 *Dizayningizga qancha narx bera olasiz?*\n\nFaqat raqam kiriting _(masalan: 50, 100, 200)_\nBot avtomatik so'mga o'tkazadi.",
         "narx_invalid": "❗ Iltimos, faqat raqam kiriting _(masalan: 50, 100, 200)_",
         "narx_skip_btn": "⏭ O'tkazib yuborish",
         "narx_done": "✅ *Rahmat! Ma'lumotlaringiz qabul qilindi.*\n\nTez orada mutaxassislarimiz siz bilan bog'lanadi!",
         "lang_changed": "✅ Til o'zgartirildi!",
+        "btn_faq": "❓ FAQ",
+        "faq_title": "❓ *FAQ*\n\nQaysi bo'lim sizni qiziqtiradi?",
+        "faq_btn_order": "💳 Buyurtma va to'lov",
+        "faq_btn_product": "📦 Mahsulot",
+        "faq_btn_tech": "🖨 Texnik savollar",
+        "faq_btn_general": "🏢 Umumiy",
+        "faq_order": (
+            "💳 *Buyurtma va to'lov*\n\n"
+            "❓ *Qanday to'lov usullari bor?*\n"
+            "✅ Click, Payme, Uzcard, Humo orqali to'lash mumkin.\n\n"
+            "❓ *Buyurtma qancha kunda tayyor bo'ladi?*\n"
+            "✅ Oddiy buyurtma 3-5 ish kuni, dizaynli mahsulot 5-7 ish kuni.\n\n"
+            "❓ *Yetkazib berish bormi? Narxi qancha?*\n"
+            "✅ Ha, butun O'zbekiston bo'ylab yetkazib beramiz. Narxi manzilga qarab belgilanadi.\n\n"
+            "❓ *Buyurtmani bekor qilish mumkinmi?*\n"
+            "✅ Ishlab chiqarish boshlangunga qadar bekor qilish mumkin. Operatorga murojaat qiling."
+        ),
+        "faq_product": (
+            "📦 *Mahsulot haqida*\n\n"
+            "❓ *Dizayn uchun rasm qanday formatda bo'lishi kerak?*\n"
+            "✅ PNG yoki JPG formatida, minimal 300 DPI sifatida.\n\n"
+            "❓ *O'lchamlar qanday?*\n"
+            "✅ XS dan 3XL gacha. Buyurtma berishda o'lcham jadvalini yuboramiz.\n\n"
+            "❓ *Mahsulot yoqmasa qaytarish mumkinmi?*\n"
+            "✅ Ishlab chiqarishdagi nuqson bo'lsa 100% qaytaramiz. Shaxsiy dizaynlar qaytarilmaydi.\n\n"
+            "❓ *Minimal buyurtma miqdori bormi?*\n"
+            "✅ Bitta mahsulotdan buyurtma berish mumkin. Ulgurji uchun alohida narxlar mavjud."
+        ),
+        "faq_tech": (
+            "🖨 *Texnik savollar*\n\n"
+            "❓ *Dizayn tayyorlanish muddati qancha?*\n"
+            "✅ Dizayn tasdiqlash 1-2 soat, ishlab chiqarish 3-7 ish kuni.\n\n"
+            "❓ *Rasm sifati past bo'lsa nima bo'ladi?*\n"
+            "✅ Mutaxassislarimiz siz bilan bog'lanib, yaxshiroq rasm so'raydi.\n\n"
+            "❓ *Qaysi bosma usuli yaxshiroq?*\n"
+            "✅ Kiyim uchun DTF yoki DTG, qattiq yuzalar uchun UV print, foto sifat uchun sublimatsiya tavsiya etiladi."
+        ),
+        "faq_general": (
+            "🏢 *Umumiy savollar*\n\n"
+            "❓ *Ofis manzili qayerda?*\n"
+            "✅ Toshkent sh. Manzilni operatordan so'rashingiz mumkin: @asoxmarket\n\n"
+            "❓ *Ish vaqti qachon?*\n"
+            "✅ Dushanba — Shanba: 09:00 — 18:00\n\n"
+            "❓ *Ulgurji buyurtma bo'ladimi?*\n"
+            "✅ Ha! 10 dona va undan ko'p buyurtmada maxsus chegirmalar mavjud. Operatorga murojaat qiling."
+        ),
         "design_custom_title": (
             "🎨 *O'z dizayningizni joylashtiring*\n\n"
             "Quyidagi mahsulotlardan birini tanlang —\n"
@@ -282,7 +396,7 @@ TEXTS = {
             "▶️ YouTube: @asoxmarket\n"
             "🌐 Сайт: https://asox.uz/"
         ),
-        "btn_about": "🎨 Создайте свой дизайн",
+        "btn_about": "🎨 Поделитесь своим дизайном",
         "btn_design_add": "➕ Добавить дизайн",
         "btn_catalog": "📦 Каталог товаров",
         "btn_aksiya": "🔥 Акции",
@@ -308,11 +422,61 @@ TEXTS = {
         "taklif_prompt": "💡 *Напишите ваше предложение*\n\nКакой товар или услугу вы хотите видеть у нас?",
         "taklif_done": "✅ *Ваше предложение принято! Спасибо!*",
         "taklif_cancel_btn": "❌ Отмена",
+        "btn_faq_ask": "✍️ Задать вопрос",
+        "faq_ask_prompt": "✍️ *Напишите ваш вопрос*\n\nНаши специалисты скоро ответят:",
+        "faq_ask_done": "✅ *Ваш вопрос принят! Скоро ответим.*",
+        "faq_ask_cancel_btn": "❌ Отмена",
         "narx_prompt": "💰 *Сколько вы готовы заплатить за дизайн?*\n\nВведите только цифру _(например: 50, 100, 200)_\nБот автоматически переведёт в сумы.",
         "narx_invalid": "❗ Пожалуйста, введите только цифру _(например: 50, 100, 200)_",
         "narx_skip_btn": "⏭ Пропустить",
         "narx_done": "✅ *Спасибо! Ваша информация принята.*\n\nНаши специалисты свяжутся с вами в ближайшее время!",
         "lang_changed": "✅ Язык изменён!",
+        "btn_faq": "❓ Часто задаваемые вопросы",
+        "faq_title": "❓ *Часто задаваемые вопросы*\n\nКакой раздел вас интересует?",
+        "faq_btn_order": "💳 Заказ и оплата",
+        "faq_btn_product": "📦 Товар",
+        "faq_btn_tech": "🖨 Технические вопросы",
+        "faq_btn_general": "🏢 Общие вопросы",
+        "faq_order": (
+            "💳 *Заказ и оплата*\n\n"
+            "❓ *Какие способы оплаты есть?*\n"
+            "✅ Можно оплатить через Click, Payme, Uzcard, Humo.\n\n"
+            "❓ *Сколько дней готовится заказ?*\n"
+            "✅ Обычный заказ 3-5 рабочих дней, товар с дизайном 5-7 рабочих дней.\n\n"
+            "❓ *Есть ли доставка? Сколько стоит?*\n"
+            "✅ Да, доставляем по всему Узбекистану. Стоимость зависит от адреса.\n\n"
+            "❓ *Можно ли отменить заказ?*\n"
+            "✅ Можно до начала производства. Обратитесь к оператору."
+        ),
+        "faq_product": (
+            "📦 *О товаре*\n\n"
+            "❓ *В каком формате должно быть изображение для дизайна?*\n"
+            "✅ PNG или JPG, минимум 300 DPI.\n\n"
+            "❓ *Какие размеры доступны?*\n"
+            "✅ От XS до 3XL. При заказе отправим таблицу размеров.\n\n"
+            "❓ *Можно ли вернуть товар?*\n"
+            "✅ При производственном дефекте возврат 100%. Персональный дизайн возврату не подлежит.\n\n"
+            "❓ *Есть ли минимальный объём заказа?*\n"
+            "✅ Можно заказать от одного изделия. Для оптовых заказов — отдельные цены."
+        ),
+        "faq_tech": (
+            "🖨 *Технические вопросы*\n\n"
+            "❓ *Сколько времени занимает подготовка дизайна?*\n"
+            "✅ Согласование дизайна 1-2 часа, производство 3-7 рабочих дней.\n\n"
+            "❓ *Что если качество изображения низкое?*\n"
+            "✅ Наши специалисты свяжутся с вами и попросят изображение лучшего качества.\n\n"
+            "❓ *Какой метод печати лучше?*\n"
+            "✅ Для одежды — DTF или DTG, для твёрдых поверхностей — UV печать, для фото качества — сублимация."
+        ),
+        "faq_general": (
+            "🏢 *Общие вопросы*\n\n"
+            "❓ *Где находится офис?*\n"
+            "✅ г. Ташкент. Точный адрес можно узнать у оператора: @asoxmarket\n\n"
+            "❓ *Какой режим работы?*\n"
+            "✅ Понедельник — Суббота: 09:00 — 18:00\n\n"
+            "❓ *Возможен ли оптовый заказ?*\n"
+            "✅ Да! При заказе от 10 штук действуют специальные скидки. Обратитесь к оператору."
+        ),
         "design_custom_title": (
             "🎨 *Разместите свой дизайн*\n\n"
             "Выберите товар из списка —\n"
@@ -325,6 +489,202 @@ TEXTS = {
             "🕐 Наши специалисты свяжутся с вами в ближайшее время!"
         ),
         "design_cancel_btn": "❌ Отмена",
+    },
+    "en": {
+        "welcome": (
+            "👋 Hello!\n"
+            "🛒 Welcome to *ASOX Market* bot!\n\n"
+            "Please choose a section:"
+        ),
+        "about": (
+            "ℹ️ *About ASOX Market*\n\n"
+            "ASOX Market — premium e-commerce platform in Uzbekistan.\n\n"
+            "✅ *Our services:*\n"
+            "🎨 Personal design studio\n"
+            "🖨 Print marketplace\n"
+            "📹 Live shopping\n"
+            "🤖 AI assistant\n"
+            "🔒 Secure payment (Click, Payme, Uzcard, Humo)\n\n"
+            "📲 Download the app and get a discount on your first order!"
+        ),
+        "catalog_title": "📦 *Product catalog*\n\nChoose a category:",
+        "clothes_title": (
+            "👕 *Clothing*\n\n"
+            "Clothing with your unique design:\n\n"
+            "👕 T-shirt\n"
+            "🧥 Hoodie\n"
+            "🥻 Polo shirt\n"
+            "🩳 Shorts\n"
+            "🧦 Socks\n"
+            "🧤 Gloves\n"
+            "🏃 Sportswear\n"
+            "🎽 Uniform\n\n"
+            "🌐 Visit the website for more information:"
+        ),
+        "gifts_title": (
+            "🎁 *Gifts*\n\n"
+            "Special gifts for your loved ones:\n\n"
+            "☕ Mug\n"
+            "🧴 Thermos\n"
+            "🛏 Pillow\n"
+            "🖼 Poster\n"
+            "🖼 Canvas\n"
+            "🗓 Calendar\n"
+            "📒 Notebook\n"
+            "🎀 Gift set\n\n"
+            "🌐 Visit the website for more information:"
+        ),
+        "accessories_title": (
+            "📱 *Accessories*\n\n"
+            "Accessories with personal design:\n\n"
+            "📱 Phone case\n"
+            "🎒 Backpack\n"
+            "👜 Bag\n"
+            "🧢 Cap\n"
+            "⌚ Watch strap\n"
+            "🖱 Mouse pad\n\n"
+            "🌐 Visit the website for more information:"
+        ),
+        "design_title": (
+            "🎨 *Design products*\n\n"
+            "Place your image or logo on the following products:\n\n"
+            "👕 T-shirt\n"
+            "🧥 Hoodie\n"
+            "☕ Mug\n"
+            "🖼 Poster\n"
+            "🖼 Canvas\n"
+            "🛏 Pillow\n"
+            "🧴 Thermos\n"
+            "🏃 Sportswear\n\n"
+            "➕ And 40+ more products!\n\n"
+            "🌐 Visit the website for more information:"
+        ),
+        "print_title": (
+            "🖨 *Print services*\n\n"
+            "Find certified print masters in Uzbekistan:\n\n"
+            "🔵 UV print — Hard surfaces\n"
+            "🟡 DTF — Textile\n"
+            "🟢 DTG — Direct to fabric\n"
+            "🟠 Sublimation — Photo quality\n"
+            "🔴 Eco-solvent — Banners\n"
+            "⚪ 3D print — Volumetric products\n"
+            "🔶 Laser — Engraving and cutting\n"
+            "🔷 CNC — Precision processing\n\n"
+            "🌐 Visit the website to find a master:"
+        ),
+        "aksiya": (
+            "🔥 *Promotions and discounts*\n\n"
+            "🎉 Current special offers:\n\n"
+            "👕 *T-shirt* — 20% off\n"
+            "🧥 *Hoodie* — 15% off\n"
+            "☕ *Mug* — buy 2 get 1 free\n"
+            "🎒 *Backpack* — 25% off\n"
+            "🖼 *Poster + Canvas* — 30% cheaper as a set\n\n"
+            "⏳ *Promotion valid until:* July 31, 2026\n\n"
+            "📲 Visit the website to order:"
+        ),
+        "contact": (
+            "📞 *Contact*\n\n"
+            "📲 Main: +998 90 009 00 38\n"
+            "📲 Backup: +998 90 657 81 45\n\n"
+            "📱 Telegram: @asoxmarket\n"
+            "📸 Instagram: [asox.uz](https://www.instagram.com/asox.uz?igsh=MWxibzN1aW52bXo5)\n"
+            "▶️ YouTube: @asoxmarket\n"
+            "🌐 Website: https://asox.uz/"
+        ),
+        "btn_about": "🎨 Share your design",
+        "btn_design_add": "➕ Add design",
+        "btn_catalog": "📦 Product catalog",
+        "btn_aksiya": "🔥 Promotions",
+        "btn_contact": "📞 Contact",
+        "btn_site": "🌐 Go to website",
+        "btn_clothes": "👕 Clothing",
+        "btn_gifts": "🎁 Gifts",
+        "btn_accessories": "📱 Accessories",
+        "btn_design": "🎨 Design products",
+        "btn_print": "🖨 Print services",
+        "btn_back": "⬅️ Back",
+        "btn_lang": "🌐 Change language",
+        "btn_izoh": "📝 Add comment",
+        "izoh_prompt": (
+            "📝 *Comment or additional info*\n\n"
+            "Describe in detail what product you want:\n"
+            "_(e.g.: color, size, quantity, special requirements, etc.)_"
+        ),
+        "izoh_done": "✅ *Your comment has been accepted!*",
+        "izoh_cancel_btn": "❌ Cancel",
+        "izoh_skip_btn": "⏭ Skip",
+        "btn_taklif": "💡 Leave a suggestion",
+        "taklif_prompt": "💡 *Write your suggestion*\n\nWhat product or service would you like us to add?",
+        "taklif_done": "✅ *Your suggestion has been accepted! Thank you!*",
+        "taklif_cancel_btn": "❌ Cancel",
+        "btn_faq_ask": "✍️ Ask a question",
+        "faq_ask_prompt": "✍️ *Write your question*\n\nOur specialists will reply soon:",
+        "faq_ask_done": "✅ *Your question has been received! We'll reply soon.*",
+        "faq_ask_cancel_btn": "❌ Cancel",
+        "narx_prompt": "💰 *How much would you pay for the design?*\n\nEnter only a number _(e.g.: 50, 100, 200)_\nThe bot will automatically convert to soums.",
+        "narx_invalid": "❗ Please enter only a number _(e.g.: 50, 100, 200)_",
+        "narx_skip_btn": "⏭ Skip",
+        "narx_done": "✅ *Thank you! Your information has been received.*\n\nOur specialists will contact you shortly!",
+        "lang_changed": "✅ Language changed!",
+        "btn_faq": "❓ FAQ",
+        "faq_title": "❓ *Frequently Asked Questions*\n\nWhich section interests you?",
+        "faq_btn_order": "💳 Order & Payment",
+        "faq_btn_product": "📦 Product",
+        "faq_btn_tech": "🖨 Technical Questions",
+        "faq_btn_general": "🏢 General",
+        "faq_order": (
+            "💳 *Order & Payment*\n\n"
+            "❓ *What payment methods are available?*\n"
+            "✅ You can pay via Click, Payme, Uzcard, Humo.\n\n"
+            "❓ *How long does an order take?*\n"
+            "✅ Regular orders take 3-5 business days, design products 5-7 business days.\n\n"
+            "❓ *Is delivery available? How much does it cost?*\n"
+            "✅ Yes, we deliver across all of Uzbekistan. Cost depends on the address.\n\n"
+            "❓ *Can I cancel an order?*\n"
+            "✅ You can cancel before production starts. Contact the operator."
+        ),
+        "faq_product": (
+            "📦 *About Products*\n\n"
+            "❓ *What format should the design image be?*\n"
+            "✅ PNG or JPG format, minimum 300 DPI quality.\n\n"
+            "❓ *What sizes are available?*\n"
+            "✅ From XS to 3XL. We'll send you a size chart when ordering.\n\n"
+            "❓ *Can I return a product?*\n"
+            "✅ 100% return for manufacturing defects. Custom design products cannot be returned.\n\n"
+            "❓ *Is there a minimum order quantity?*\n"
+            "✅ You can order from 1 item. Special prices available for wholesale."
+        ),
+        "faq_tech": (
+            "🖨 *Technical Questions*\n\n"
+            "❓ *How long does design preparation take?*\n"
+            "✅ Design approval takes 1-2 hours, production 3-7 business days.\n\n"
+            "❓ *What if the image quality is low?*\n"
+            "✅ Our specialists will contact you and ask for a higher quality image.\n\n"
+            "❓ *Which print method is best?*\n"
+            "✅ DTF or DTG for clothing, UV print for hard surfaces, sublimation for photo quality."
+        ),
+        "faq_general": (
+            "🏢 *General Questions*\n\n"
+            "❓ *Where is the office located?*\n"
+            "✅ Tashkent city. You can get the exact address from the operator: @asoxmarket\n\n"
+            "❓ *What are the working hours?*\n"
+            "✅ Monday — Saturday: 09:00 — 18:00\n\n"
+            "❓ *Is wholesale ordering available?*\n"
+            "✅ Yes! Special discounts for orders of 10+ items. Contact the operator."
+        ),
+        "design_custom_title": (
+            "🎨 *Place your design*\n\n"
+            "Choose a product from the list —\n"
+            "we'll put your image or logo on it!"
+        ),
+        "design_photo_prompt": "📸 *{product}* selected!\n\nPlease send your design image 👇\n_(Choose from gallery)_",
+        "design_done": (
+            "✅ *Thank you! Your design has been accepted.*\n\n"
+            "📦 Product: {product}\n\n"
+            "🕐 Our specialists will contact you shortly!"
+        ),
+        "design_cancel_btn": "❌ Cancel",
     }
 }
 
@@ -353,19 +713,33 @@ DESIGN_PRODUCT_NAMES = {
 }
 
 def get_lang(user_id):
-    return user_lang.get(user_id, "uz")
+    if user_id in user_lang:
+        return user_lang[user_id]
+    saved = get_user(user_id)
+    if saved and saved.get("lang"):
+        return saved["lang"]
+    return "uz"
 
 def design_products_menu(lang):
     t = TEXTS[lang]
     products = list(DESIGN_PRODUCT_NAMES.items())
     rows = []
-    for i in range(0, len(products), 2):
+    # agar mahsulotlar soni toq bo'lsa, oxirgi mahsulotni "Bekor qilish" bilan yonma-yon qo'yamiz
+    last_paired = len(products) - 1 if len(products) % 2 != 0 else len(products)
+    for i in range(0, last_paired, 2):
         row = [InlineKeyboardButton(products[i][1], callback_data=products[i][0])]
-        if i + 1 < len(products):
+        if i + 1 < last_paired:
             row.append(InlineKeyboardButton(products[i + 1][1], callback_data=products[i + 1][0]))
         rows.append(row)
+    if len(products) % 2 != 0:
+        last = products[-1]
+        rows.append([
+            InlineKeyboardButton(last[1], callback_data=last[0]),
+            InlineKeyboardButton(t["design_cancel_btn"], callback_data="back"),
+        ])
+    else:
+        rows.append([InlineKeyboardButton(t["design_cancel_btn"], callback_data="back")])
     rows.append([InlineKeyboardButton(t["btn_taklif"], callback_data="taklif")])
-    rows.append([InlineKeyboardButton(t["design_cancel_btn"], callback_data="back")])
     return InlineKeyboardMarkup(rows)
 
 def main_menu(lang):
@@ -376,7 +750,20 @@ def main_menu(lang):
         [InlineKeyboardButton(t["btn_aksiya"], callback_data="aksiya")],
         [InlineKeyboardButton(t["btn_contact"], callback_data="contact")],
         [InlineKeyboardButton(t["btn_site"], url="https://asox.uz/")],
+        [InlineKeyboardButton(t["btn_faq"], callback_data="faq")],
         [InlineKeyboardButton(t["btn_lang"], callback_data="lang")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def faq_menu(lang):
+    t = TEXTS[lang]
+    keyboard = [
+        [InlineKeyboardButton(t["faq_btn_order"], callback_data="faq_order")],
+        [InlineKeyboardButton(t["faq_btn_product"], callback_data="faq_product")],
+        [InlineKeyboardButton(t["faq_btn_tech"], callback_data="faq_tech")],
+        [InlineKeyboardButton(t["faq_btn_general"], callback_data="faq_general")],
+        [InlineKeyboardButton(t["btn_faq_ask"], callback_data="faq_ask")],
+        [InlineKeyboardButton(t["btn_back"], callback_data="back")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -409,12 +796,48 @@ def lang_menu():
     keyboard = [
         [InlineKeyboardButton("🇺🇿 O'zbek", callback_data="set_uz")],
         [InlineKeyboardButton("🇷🇺 Русский", callback_data="set_ru")],
+        [InlineKeyboardButton("🇬🇧 English", callback_data="set_en")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def phone_keyboard():
     keyboard = [[KeyboardButton("📱 Kontakt qo'shish", request_contact=True)]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+async def promo_check_loop(app):
+    while True:
+        try:
+            now = datetime.now()
+            next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
+            if now >= next_run:
+                next_run = next_run.replace(day=next_run.day + 1)
+            await asyncio.sleep((next_run - now).total_seconds())
+
+            today = date.today()
+            promos = load_promotions()
+            ending_soon = {}
+            for p in promos:
+                try:
+                    end = date.fromisoformat(p["end_date"])
+                    days_left = (end - today).days
+                    if days_left == 2:
+                        ending_soon.setdefault(p["end_date"], []).append(p)
+                except Exception:
+                    pass
+
+            if ending_soon:
+                lines = ["⚠️ *Aksiya tugashiga 2 kun qoldi!*\n"]
+                for end_date, items in ending_soon.items():
+                    for p in items:
+                        lines.append(f"{p['emoji']} *{p['name']}* — {p['discount']}")
+                    lines.append(f"📅 Tugash sanasi: {end_date}")
+                lines.append("\n➕ Yangi aksiya qo'shmoqchimisiz?")
+                msg = "\n".join(lines)
+                url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
+                for admin_id in ADMIN_IDS:
+                    await http_session.post(url, json={"chat_id": admin_id, "text": msg, "parse_mode": "Markdown"})
+        except Exception as e:
+            print(f"[Promo check] Xato: {e}")
 
 async def post_init(app):
     global bot_photo_id, http_session
@@ -425,6 +848,7 @@ async def post_init(app):
             bot_photo_id = photos.photos[0][0].file_id
     except Exception:
         bot_photo_id = None
+    asyncio.create_task(promo_check_loop(app))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -644,7 +1068,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("design_photos", None)
         await edit_msg(query, t["welcome"], main_menu(lang))
     elif data == "aksiya":
-        await edit_msg(query, t["aksiya"], InlineKeyboardMarkup([
+        await edit_msg(query, build_aksiya_text(lang), InlineKeyboardMarkup([
             [InlineKeyboardButton(t["btn_site"], url="https://asox.uz/")],
             [InlineKeyboardButton(t["btn_back"], callback_data="back")],
         ]))
@@ -662,16 +1086,48 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_msg(query, t["design_title"], back_menu(lang))
     elif data == "print":
         await edit_msg(query, t["print_title"], back_menu(lang))
+    elif data == "faq":
+        await edit_msg(query, t["faq_title"], faq_menu(lang))
+    elif data == "faq_ask":
+        context.user_data["awaiting_faq_ask"] = True
+        await edit_msg(query, t["faq_ask_prompt"], InlineKeyboardMarkup([
+            [InlineKeyboardButton(t["faq_ask_cancel_btn"], callback_data="faq_ask_cancel")]
+        ]))
+    elif data == "faq_ask_cancel":
+        context.user_data.pop("awaiting_faq_ask", None)
+        await edit_msg(query, t["faq_title"], faq_menu(lang))
+    elif data == "faq_order":
+        await edit_msg(query, t["faq_order"], InlineKeyboardMarkup([
+            [InlineKeyboardButton(t["btn_back"], callback_data="faq")]
+        ]))
+    elif data == "faq_product":
+        await edit_msg(query, t["faq_product"], InlineKeyboardMarkup([
+            [InlineKeyboardButton(t["btn_back"], callback_data="faq")]
+        ]))
+    elif data == "faq_tech":
+        await edit_msg(query, t["faq_tech"], InlineKeyboardMarkup([
+            [InlineKeyboardButton(t["btn_back"], callback_data="faq")]
+        ]))
+    elif data == "faq_general":
+        await edit_msg(query, t["faq_general"], InlineKeyboardMarkup([
+            [InlineKeyboardButton(t["btn_back"], callback_data="faq")]
+        ]))
     elif data == "contact":
         await edit_msg(query, t["contact"], back_to_main(lang))
     elif data == "lang":
         await edit_msg(query, "🌐 Tilni tanlang / Выберите язык:", lang_menu())
     elif data == "set_uz":
         user_lang[user_id] = "uz"
+        save_lang(user_id, "uz")
         await edit_msg(query, TEXTS["uz"]["lang_changed"] + "\n\n" + TEXTS["uz"]["welcome"], main_menu("uz"))
     elif data == "set_ru":
         user_lang[user_id] = "ru"
+        save_lang(user_id, "ru")
         await edit_msg(query, TEXTS["ru"]["lang_changed"] + "\n\n" + TEXTS["ru"]["welcome"], main_menu("ru"))
+    elif data == "set_en":
+        user_lang[user_id] = "en"
+        save_lang(user_id, "en")
+        await edit_msg(query, TEXTS["en"]["lang_changed"] + "\n\n" + TEXTS["en"]["welcome"], main_menu("en"))
     elif data == "back":
         await edit_msg(query, t["welcome"], main_menu(lang))
 
@@ -805,6 +1261,31 @@ async def izoh_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t["narx_skip_btn"], callback_data="narx_skip")]])
     )
 
+async def faq_ask_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    lang = get_lang(user.id)
+    t = TEXTS[lang]
+    reg_name = context.user_data.get("name", "")
+    name_line = reg_name if reg_name else (user.full_name or "")
+    username = f"@{user.username}" if user.username else "username yo'q"
+
+    admin_text = (
+        f"❓ *Foydalanuvchidan savol!*\n\n"
+        f"👤 Ism: {name_line}\n"
+        f"💬 Telegram: {username}\n"
+        f"🆔 ID: `{user.id}`\n\n"
+        f"❓ Savol:\n{update.message.text}"
+    )
+    try:
+        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
+        for admin_id in ADMIN_IDS:
+            await http_session.post(url, json={"chat_id": admin_id, "text": admin_text, "parse_mode": "Markdown"})
+    except Exception as e:
+        print(f"[FAQ] Xato: {e}")
+
+    context.user_data.pop("awaiting_faq_ask", None)
+    await update.message.reply_text(t["faq_ask_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
+
 async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_narx"):
         await narx_received(update, context)
@@ -812,6 +1293,8 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await izoh_received(update, context)
     elif context.user_data.get("awaiting_taklif"):
         await taklif_received(update, context)
+    elif context.user_data.get("awaiting_faq_ask"):
+        await faq_ask_received(update, context)
 
 async def taklif_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user

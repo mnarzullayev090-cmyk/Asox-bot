@@ -477,6 +477,7 @@ def main():
         fallbacks=[CommandHandler("bekor_xabar", bekor_xabar)],
         name="xabar_conv",
         persistent=True,
+        conversation_timeout=900,
     )
 
     aksiya_conv = ConversationHandler(
@@ -490,6 +491,7 @@ def main():
         fallbacks=[CommandHandler("bekor_xabar", bekor_xabar)],
         name="aksiya_conv",
         persistent=True,
+        conversation_timeout=900,
     )
 
     app.add_handler(CommandHandler("start", start))

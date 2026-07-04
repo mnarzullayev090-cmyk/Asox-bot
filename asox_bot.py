@@ -1737,6 +1737,7 @@ def main():
         fallbacks=[CommandHandler("start", start)],
         name="registration_conv",
         persistent=True,
+        conversation_timeout=1800,
     )
 
     app.add_handler(conv_handler)

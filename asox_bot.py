@@ -151,6 +151,7 @@ ORDER_API_KEY = os.getenv("ORDER_API_KEY", "")
 ORDER_API_PORT = int(os.getenv("ORDER_API_PORT", "8088"))
 
 ASK_NAME, ASK_PHONE, DESIGN_CHOOSE, DESIGN_PHOTO = range(4)
+SELLER_REQUEST_COOLDOWN = timedelta(hours=6)
 
 TEXTS = {
     "uz": {
@@ -1027,7 +1028,16 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.contact:
         phone = update.message.contact.phone_number
     else:
-        phone = update.message.text
+        phone = update.message.text.strip()
+        if not is_valid_phone(phone):
+            await update.message.reply_text(
+                "❗ Iltimos, to'g'ri telefon raqam kiriting\n"
+                "yoki quyidagi tugmani bosing:\n"
+                "_(masalan: +998901234567)_",
+                parse_mode="Markdown",
+                reply_markup=phone_keyboard()
+            )
+            return ASK_PHONE
 
     context.user_data["phone"] = phone
     name = context.user_data.get("name", "Noma'lum")
@@ -1283,7 +1293,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 await edit_msg(query, t["sotuvchi_not_yet"], main_menu(lang))
-                await _notify_admin_seller_request(query.from_user, phone, context)
+                last_sent = context.user_data.get("seller_request_sent_at")
+                now = datetime.now()
+                if not last_sent or now - datetime.fromisoformat(last_sent) > SELLER_REQUEST_COOLDOWN:
+                    context.user_data["seller_request_sent_at"] = now.isoformat()
+                    await _notify_admin_seller_request(query.from_user, phone, context)
     elif data == "sotuvchi_update":
         context.user_data["awaiting_sotuvchi"] = True
         await query.message.reply_text(

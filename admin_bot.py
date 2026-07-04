@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import fcntl
 import aiohttp
 from datetime import date
 from dotenv import load_dotenv
@@ -34,6 +35,20 @@ def load_requests_log():
     except Exception:
         return []
 
+def atomic_write_json(path, data, **dump_kwargs):
+    """Faylni qulf (flock) ostida vaqtinchalik faylga yozib, keyin atomik almashtiradi —
+    parallel yozishda yoki jarayon qulab tushganda fayl buzilib qolmasligi uchun."""
+    lock_path = path + ".lock"
+    with open(lock_path, "a+") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(data, f, **dump_kwargs)
+            os.replace(tmp_path, path)
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
+
 ASK_NAME, ASK_EMOJI, ASK_DISCOUNT, ASK_DATE = range(4)
 ASK_MSG_ID, ASK_MSG_TEXT = range(4, 6)
 
@@ -54,18 +69,26 @@ def load_seller_whitelist():
         return []
 
 def add_to_seller_whitelist(phones):
-    whitelist = load_seller_whitelist()
-    existing = {normalize_phone(p) for p in whitelist}
-    added = 0
-    for phone in phones:
-        norm = normalize_phone(phone)
-        if len(norm) < 7 or norm in existing:
-            continue
-        whitelist.append(phone)
-        existing.add(norm)
-        added += 1
-    with open(SELLER_WHITELIST_FILE, "w") as f:
-        json.dump(whitelist, f, ensure_ascii=False, indent=2)
+    lock_path = SELLER_WHITELIST_FILE + ".lock"
+    with open(lock_path, "a+") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            whitelist = load_seller_whitelist()
+            existing = {normalize_phone(p) for p in whitelist}
+            added = 0
+            for phone in phones:
+                norm = normalize_phone(phone)
+                if len(norm) < 7 or norm in existing:
+                    continue
+                whitelist.append(phone)
+                existing.add(norm)
+                added += 1
+            tmp_path = SELLER_WHITELIST_FILE + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(whitelist, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, SELLER_WHITELIST_FILE)
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
     return added, len(whitelist)
 
 def load_promotions():
@@ -81,8 +104,7 @@ def load_promotions():
         return []
 
 def save_promotions(promos):
-    with open(PROMOTIONS_FILE, "w") as f:
-        json.dump(promos, f, ensure_ascii=False, indent=2)
+    atomic_write_json(PROMOTIONS_FILE, promos, ensure_ascii=False, indent=2)
 
 def get_user(user_id):
     try:

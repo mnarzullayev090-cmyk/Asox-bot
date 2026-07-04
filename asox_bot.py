@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import logging
+import fcntl
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeChat
@@ -20,6 +21,20 @@ SELLER_WHITELIST_FILE = "/home/muxa/seller_whitelist.json"
 REQUEST_COUNTER_FILE = "/home/muxa/request_counter.json"
 REQUESTS_LOG_FILE = "/home/muxa/requests_log.json"
 
+def atomic_write_json(path, data, **dump_kwargs):
+    """Faylni qulf (flock) ostida vaqtinchalik faylga yozib, keyin atomik almashtiradi —
+    parallel yozishda yoki jarayon qulab tushganda fayl buzilib qolmasligi uchun."""
+    lock_path = path + ".lock"
+    with open(lock_path, "a+") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(data, f, **dump_kwargs)
+            os.replace(tmp_path, path)
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
+
 def load_promotions():
     try:
         with open(PROMOTIONS_FILE, "r") as f:
@@ -33,8 +48,7 @@ def load_promotions():
         return []
 
 def save_promotions(promos):
-    with open(PROMOTIONS_FILE, "w") as f:
-        json.dump(promos, f, ensure_ascii=False, indent=2)
+    atomic_write_json(PROMOTIONS_FILE, promos, ensure_ascii=False, indent=2)
 
 def build_aksiya_text(lang):
     promos = load_promotions()
@@ -83,8 +97,7 @@ def save_user(user_id, name, phone):
     users = load_users()
     existing = users.get(str(user_id), {})
     users[str(user_id)] = {"name": name, "phone": phone, "lang": existing.get("lang", "uz")}
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, ensure_ascii=False)
+    atomic_write_json(USERS_FILE, users, ensure_ascii=False)
 
 def save_lang(user_id, lang):
     users = load_users()
@@ -92,8 +105,7 @@ def save_lang(user_id, lang):
         users[str(user_id)]["lang"] = lang
     else:
         users[str(user_id)] = {"name": "", "phone": "", "lang": lang}
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, ensure_ascii=False)
+    atomic_write_json(USERS_FILE, users, ensure_ascii=False)
 
 def get_user(user_id):
     return load_users().get(str(user_id))
@@ -113,8 +125,7 @@ def save_seller(user_id, name, phone, username):
         "username": username,
         "registered_at": datetime.now().isoformat(),
     }
-    with open(SELLERS_FILE, "w") as f:
-        json.dump(sellers, f, ensure_ascii=False, indent=2)
+    atomic_write_json(SELLERS_FILE, sellers, ensure_ascii=False, indent=2)
 
 def normalize_phone(phone):
     return "".join(ch for ch in phone if ch.isdigit())[-9:]
@@ -149,14 +160,22 @@ def is_phone_whitelisted(phone):
     return any(normalize_phone(p) == target for p in load_seller_whitelist())
 
 def next_request_id():
-    try:
-        with open(REQUEST_COUNTER_FILE, "r") as f:
-            n = json.load(f).get("counter", 0)
-    except Exception:
-        n = 0
-    n += 1
-    with open(REQUEST_COUNTER_FILE, "w") as f:
-        json.dump({"counter": n}, f)
+    lock_path = REQUEST_COUNTER_FILE + ".lock"
+    with open(lock_path, "a+") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                with open(REQUEST_COUNTER_FILE, "r") as f:
+                    n = json.load(f).get("counter", 0)
+            except Exception:
+                n = 0
+            n += 1
+            tmp_path = REQUEST_COUNTER_FILE + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump({"counter": n}, f)
+            os.replace(tmp_path, REQUEST_COUNTER_FILE)
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
     return f"A{1000 + n}"
 
 def log_request(request_id, req_type, user, summary):
@@ -168,15 +187,23 @@ def log_request(request_id, req_type, user, summary):
         "summary": (summary or "")[:150],
         "created_at": datetime.now().isoformat(),
     }
-    try:
-        with open(REQUESTS_LOG_FILE, "r") as f:
-            log = json.load(f)
-    except Exception:
-        log = []
-    log.append(entry)
-    log = log[-1000:]
-    with open(REQUESTS_LOG_FILE, "w") as f:
-        json.dump(log, f, ensure_ascii=False, indent=2)
+    lock_path = REQUESTS_LOG_FILE + ".lock"
+    with open(lock_path, "a+") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                with open(REQUESTS_LOG_FILE, "r") as f:
+                    log = json.load(f)
+            except Exception:
+                log = []
+            log.append(entry)
+            log = log[-1000:]
+            tmp_path = REQUESTS_LOG_FILE + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump(log, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, REQUESTS_LOG_FILE)
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
 
 load_dotenv()
 

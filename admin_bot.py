@@ -17,6 +17,22 @@ ADMIN_IDS = [int(os.getenv("ADMIN_ID")), int(os.getenv("ADMIN_ID2"))]
 PROMOTIONS_FILE = "/home/muxa/promotions.json"
 USERS_FILE = "/home/muxa/users.json"
 SELLER_WHITELIST_FILE = "/home/muxa/seller_whitelist.json"
+REQUESTS_LOG_FILE = "/home/muxa/requests_log.json"
+
+REQUEST_TYPE_LABELS = {
+    "dizayn": "🎨 Dizayn so'rovi",
+    "taklif": "💡 Taklif",
+    "savol": "❓ Savol",
+    "sotuvchi": "🏪 Sotuvchi so'rovi",
+}
+REQUEST_TYPE_EMOJI = {"dizayn": "🎨", "taklif": "💡", "savol": "❓", "sotuvchi": "🏪"}
+
+def load_requests_log():
+    try:
+        with open(REQUESTS_LOG_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return []
 
 ASK_NAME, ASK_EMOJI, ASK_DISCOUNT, ASK_DATE = range(4)
 ASK_MSG_ID, ASK_MSG_TEXT = range(4, 6)
@@ -106,7 +122,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔥 *Aksiyalar:*\n"
         "`/aksiyalar` — ro'yxat\n"
         "`/aksiya_qush` — qo'shish\n"
-        "`/aksiya_ochir <raqam>` — o'chirish",
+        "`/aksiya_ochir <raqam>` — o'chirish\n\n"
+        "📊 *So'rovlar:*\n"
+        "`/statistika` — bugungi so'rovlar soni\n"
+        "`/sorovlar` — oxirgi 10 ta so'rov",
         parse_mode="Markdown",
         reply_markup=admin_menu()
     )
@@ -361,6 +380,53 @@ async def aksiya_ochir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+async def statistika(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Ruxsat yo'q.")
+        return
+    log = load_requests_log()
+    today = date.today().isoformat()
+    today_entries = [e for e in log if e.get("created_at", "").startswith(today)]
+
+    lines = [f"📊 *Bugungi statistika* ({today})\n"]
+    if not today_entries:
+        lines.append("Hozircha so'rov yo'q.")
+    else:
+        counts = {}
+        for e in today_entries:
+            t = e.get("type", "boshqa")
+            counts[t] = counts.get(t, 0) + 1
+        for t, cnt in counts.items():
+            lines.append(f"{REQUEST_TYPE_LABELS.get(t, t)}: {cnt} ta")
+        lines.append(f"\nJami: {len(today_entries)} ta")
+    text = "\n".join(lines)
+    try:
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(text)
+
+async def sorovlar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Ruxsat yo'q.")
+        return
+    log = load_requests_log()
+    if not log:
+        await update.message.reply_text("😔 Hozircha so'rovlar yo'q.")
+        return
+    last = list(reversed(log[-10:]))
+    lines = ["📋 *Oxirgi so'rovlar:*\n"]
+    for e in last:
+        emoji = REQUEST_TYPE_EMOJI.get(e.get("type", ""), "📌")
+        ts = e.get("created_at", "")[:16].replace("T", " ")
+        name = e.get("name", "")
+        summary = e.get("summary", "")
+        lines.append(f"{emoji} #{e.get('id', '')} — {name} ({ts})\n   {summary}")
+    text = "\n".join(lines)
+    try:
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text(text)
+
 import re
 
 def extract_user_id_from_message(text):
@@ -479,6 +545,8 @@ async def post_init(app):
             BotCommand("aksiyalar", "Faol aksiyalar ro'yxati"),
             BotCommand("aksiya_qush", "Yangi aksiya qo'shish"),
             BotCommand("aksiya_ochir", "Aksiyani o'chirish"),
+            BotCommand("statistika", "Bugungi so'rovlar statistikasi"),
+            BotCommand("sorovlar", "Oxirgi so'rovlar ro'yxati"),
         ])
     except Exception as e:
         print(f"[COMMANDS] Komandalar menyusini o'rnatishda xato: {e}")
@@ -525,6 +593,8 @@ def main():
     app.add_handler(CommandHandler("bekor", bekor))
     app.add_handler(CommandHandler("aksiyalar", aksiyalar))
     app.add_handler(CommandHandler("aksiya_ochir", aksiya_ochir))
+    app.add_handler(CommandHandler("statistika", statistika))
+    app.add_handler(CommandHandler("sorovlar", sorovlar))
     app.add_handler(xabar_conv)
     app.add_handler(aksiya_conv)
     app.add_handler(CallbackQueryHandler(approve_seller_callback, pattern=r"^approve_seller_\d+$"))

@@ -18,6 +18,7 @@ PROMOTIONS_FILE = "/home/muxa/promotions.json"
 SELLERS_FILE = "/home/muxa/sellers.json"
 SELLER_WHITELIST_FILE = "/home/muxa/seller_whitelist.json"
 REQUEST_COUNTER_FILE = "/home/muxa/request_counter.json"
+REQUESTS_LOG_FILE = "/home/muxa/requests_log.json"
 
 def load_promotions():
     try:
@@ -157,6 +158,25 @@ def next_request_id():
     with open(REQUEST_COUNTER_FILE, "w") as f:
         json.dump({"counter": n}, f)
     return f"A{1000 + n}"
+
+def log_request(request_id, req_type, user, summary):
+    entry = {
+        "id": request_id,
+        "type": req_type,
+        "user_id": user.id,
+        "name": user.full_name or "",
+        "summary": (summary or "")[:150],
+        "created_at": datetime.now().isoformat(),
+    }
+    try:
+        with open(REQUESTS_LOG_FILE, "r") as f:
+            log = json.load(f)
+    except Exception:
+        log = []
+    log.append(entry)
+    log = log[-1000:]
+    with open(REQUESTS_LOG_FILE, "w") as f:
+        json.dump(log, f, ensure_ascii=False, indent=2)
 
 load_dotenv()
 
@@ -1237,6 +1257,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         products = context.user_data.get("pending_products", [])
         izoh_text = context.user_data.get("saved_izoh", "")
         request_id = next_request_id()
+        log_request(request_id, "dizayn", user, ", ".join(products))
         for file_id, product in zip(photos, products):
             await _send_to_admin(file_id, product, user, context, izoh=izoh_text, narx="", request_id=request_id)
         context.user_data.pop("saved_izoh", None)
@@ -1338,6 +1359,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     request_id = next_request_id()
                     context.user_data["seller_request_sent_at"] = now.isoformat()
                     context.user_data["seller_request_id"] = request_id
+                    log_request(request_id, "sotuvchi", query.from_user, phone)
                     await _notify_admin_seller_request(query.from_user, phone, context, request_id)
                 await edit_msg(query, t["sotuvchi_not_yet"].format(id=request_id or "—"), main_menu(lang))
     elif data == "sotuvchi_update":
@@ -1541,6 +1563,7 @@ async def faq_ask_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = f"@{user.username}" if user.username else "username yo'q"
 
     request_id = next_request_id()
+    log_request(request_id, "savol", user, update.message.text)
     admin_text = (
         f"❓ *Foydalanuvchidan savol!* #{request_id}\n\n"
         f"👤 Ism: {name_line}\n"
@@ -1576,6 +1599,7 @@ async def taklif_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone_line = f"\n📞 Telefon: {reg_phone}" if reg_phone else ""
 
     request_id = next_request_id()
+    log_request(request_id, "taklif", user, update.message.text)
     admin_text = (
         f"💡 *Yangi taklif!* #{request_id}\n\n"
         f"👤 Ism: {name_line}\n"
@@ -1608,6 +1632,7 @@ async def narx_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photos = context.user_data.get("pending_photos", [])
     products = context.user_data.get("pending_products", [])
     request_id = next_request_id()
+    log_request(request_id, "dizayn", user, ", ".join(products))
 
     for file_id, product in zip(photos, products):
         await _send_to_admin(file_id, product, user, context, izoh=izoh_text, narx=narx_formatted, request_id=request_id)

@@ -1149,13 +1149,22 @@ async def edit_msg(query, text, reply_markup, parse_mode="Markdown"):
     else:
         await query.edit_message_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
 
+CALLBACK_TOASTS = {
+    "narx_skip": "✅ So'rov yuborildi!",
+    "design_confirm_yes": "✅ Tanlandi!",
+    "izoh_skip": "⏭ O'tkazib yuborildi",
+    "set_uz": "🇺🇿 O'zbek",
+    "set_ru": "🇷🇺 Русский",
+    "set_en": "🇬🇧 English",
+}
+
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    data = query.data
+    await query.answer(text=CALLBACK_TOASTS.get(data))
     user_id = query.from_user.id
     lang = get_lang(user_id)
     t = TEXTS[lang]
-    data = query.data
 
     if data == "design_custom":
         await edit_msg(query, t["design_custom_title"], design_products_menu(lang))
@@ -1433,6 +1442,10 @@ async def _send_to_admin(file_id, product, user, context, izoh="", narx="", requ
         f"{narx_line}"
     )
     print(f"[DIZAYN] {user.id} → {product}")
+    try:
+        await context.bot.send_chat_action(chat_id=user.id, action="upload_photo")
+    except Exception:
+        pass
     try:
         tg_file = await context.bot.get_file(file_id)
         file_bytes = await tg_file.download_as_bytearray()

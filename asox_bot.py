@@ -816,6 +816,7 @@ TEXTS = {
 user_lang = {}
 bot_photo_id = None
 http_session = None
+_photo_tasks = {}
 
 DESIGN_PRODUCT_NAMES = {
     "dp_tshirt":    "👕 T-shirt",
@@ -1459,11 +1460,11 @@ async def design_photo_received(update: Update, context: ContextTypes.DEFAULT_TY
         photos = context.user_data.get("design_photos", [])
         await _process_photos_final(chat_id, user, context, photos, [product])
     else:
-        old_task = context.user_data.pop("_photo_task", None)
+        old_task = _photo_tasks.pop(user.id, None)
         if old_task and not old_task.done():
             old_task.cancel()
         task = asyncio.create_task(_delayed_process(chat_id, user.id, user, context))
-        context.user_data["_photo_task"] = task
+        _photo_tasks[user.id] = task
 
 async def izoh_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_izoh"):
@@ -1734,6 +1735,8 @@ def main():
             ],
         },
         fallbacks=[CommandHandler("start", start)],
+        name="registration_conv",
+        persistent=True,
     )
 
     app.add_handler(conv_handler)

@@ -79,7 +79,13 @@ async def send_to_user(user_id, text):
     async with aiohttp.ClientSession() as session:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         resp = await session.post(url, json={"chat_id": user_id, "text": text, "parse_mode": "Markdown"})
-        return await resp.json()
+        result = await resp.json()
+        if not result.get("ok"):
+            resp2 = await session.post(url, json={"chat_id": user_id, "text": text})
+            result2 = await resp2.json()
+            if result2.get("ok"):
+                return result2
+        return result
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -469,6 +475,8 @@ def main():
             ASK_MSG_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_msg_text)],
         },
         fallbacks=[CommandHandler("bekor_xabar", bekor_xabar)],
+        name="xabar_conv",
+        persistent=True,
     )
 
     aksiya_conv = ConversationHandler(
@@ -480,6 +488,8 @@ def main():
             ASK_DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_aksiya_date)],
         },
         fallbacks=[CommandHandler("bekor_xabar", bekor_xabar)],
+        name="aksiya_conv",
+        persistent=True,
     )
 
     app.add_handler(CommandHandler("start", start))

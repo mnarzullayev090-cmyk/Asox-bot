@@ -1,10 +1,10 @@
 import os
 import json
 import asyncio
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters, PicklePersistence
 
 import aiohttp
 from aiohttp import web
@@ -942,7 +942,7 @@ async def promo_check_loop(app):
             now = datetime.now()
             next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
             if now >= next_run:
-                next_run = next_run.replace(day=next_run.day + 1)
+                next_run = next_run + timedelta(days=1)
             await asyncio.sleep((next_run - now).total_seconds())
 
             today = date.today()
@@ -1039,7 +1039,7 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔔 *Yangi foydalanuvchi!*\n\n"
         f"👤 Ism: {name}\n"
         f"📱 Telefon: {phone}\n"
-        f"🆔 Telegram ID: {user.id}\n"
+        f"🆔 ID: `{user.id}`\n"
         f"👤 Username: @{user.username if user.username else 'yoq'}"
     )
     try:
@@ -1680,7 +1680,8 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Yuborildi: {sent} ta\n❌ Xato: {failed} ta")
 
 def main():
-    app = Application.builder().token(TOKEN).connect_timeout(30).read_timeout(30).post_init(post_init).build()
+    persistence = PicklePersistence(filepath="/home/muxa/asox_bot_data.pickle")
+    app = Application.builder().token(TOKEN).connect_timeout(30).read_timeout(30).post_init(post_init).persistence(persistence).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],

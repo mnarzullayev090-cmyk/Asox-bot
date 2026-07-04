@@ -966,9 +966,7 @@ async def promo_check_loop(app):
                     lines.append(f"📅 Tugash sanasi: {end_date}")
                 lines.append("\n➕ Yangi aksiya qo'shmoqchimisiz?")
                 msg = "\n".join(lines)
-                url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
-                for admin_id in ADMIN_IDS:
-                    await http_session.post(url, json={"chat_id": admin_id, "text": msg, "parse_mode": "Markdown"})
+                await _notify_admins(msg, log_tag="AKSIYA")
         except Exception as e:
             print(f"[Promo check] Xato: {e}")
 
@@ -1052,16 +1050,7 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 ID: `{user.id}`\n"
         f"👤 Username: @{user.username if user.username else 'yoq'}"
     )
-    try:
-        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
-        for admin_id in ADMIN_IDS:
-            await http_session.post(url, json={
-                "chat_id": admin_id,
-                "text": admin_text,
-                "parse_mode": "Markdown"
-            })
-    except Exception as e:
-        print(f"Admin xabar yuborishda xato: {e}")
+    await _notify_admins(admin_text, log_tag="YANGI_FOYDALANUVCHI")
 
     await update.message.reply_text(
         "✅ *Rahmat! Ma'lumotlaringiz qabul qilindi.*\n\n"
@@ -1307,6 +1296,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "back":
         await edit_msg(query, t["welcome"], main_menu(lang))
 
+async def _notify_admins(text, reply_markup=None, log_tag="ADMIN XABAR"):
+    """Barcha adminlarga xabar yuboradi; javobni tekshiradi va markdown
+    xatosi bo'lsa formatsiz qayta yuboradi, aks holda xabar sezilmasdan yo'qolmasin."""
+    url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
+    for admin_id in ADMIN_IDS:
+        payload = {"chat_id": admin_id, "text": text, "parse_mode": "Markdown"}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            resp = await http_session.post(url, json=payload)
+            result = await resp.json()
+            if not result.get("ok"):
+                print(f"[{log_tag}] {admin_id} ga yuborilmadi: {result.get('description')}")
+                payload.pop("parse_mode", None)
+                retry_resp = await http_session.post(url, json=payload)
+                retry_result = await retry_resp.json()
+                if not retry_result.get("ok"):
+                    print(f"[{log_tag}] {admin_id} ga qayta urinish ham muvaffaqiyatsiz: {retry_result.get('description')}")
+        except Exception as e:
+            print(f"[{log_tag}] {admin_id} ga yuborishda xato: {e}")
+
 async def _notify_admin_seller_request(user, phone, context):
     reg_name = context.user_data.get("name", "")
     name_line = reg_name if reg_name else (user.full_name or "")
@@ -1326,15 +1336,7 @@ async def _notify_admin_seller_request(user, phone, context):
             {"text": "✅ Ha, qo'shish", "callback_data": f"approve_seller_{user.id}"}
         ]]
     }
-    try:
-        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
-        for admin_id in ADMIN_IDS:
-            await http_session.post(url, json={
-                "chat_id": admin_id, "text": admin_text,
-                "parse_mode": "Markdown", "reply_markup": keyboard
-            })
-    except Exception as e:
-        print(f"[SOTUVCHI_SOROV] Admin xabar yuborishda xato: {e}")
+    await _notify_admins(admin_text, reply_markup=keyboard, log_tag="SOTUVCHI_SOROV")
 
 async def _send_to_admin(file_id, product, user, context, izoh="", narx=""):
     reg_name = context.user_data.get("name", "")
@@ -1375,9 +1377,20 @@ async def _send_to_admin(file_id, product, user, context, izoh="", narx=""):
                 resp = await http_session.post(url, data=form)
                 result = await resp.json()
                 if not result.get("ok"):
-                    print(f"[DIZAYN] Admin {admin_id} xato: {result}")
+                    print(f"[DIZAYN] Admin {admin_id} ga yuborilmadi: {result.get('description')}")
+                    retry_form = aiohttp.FormData()
+                    retry_form.add_field("chat_id", str(admin_id))
+                    retry_form.add_field("caption", admin_text)
+                    retry_form.add_field("photo", bytes(file_bytes), filename="photo.jpg", content_type="image/jpeg")
+                    retry_resp = await http_session.post(url, data=retry_form)
+                    retry_result = await retry_resp.json()
+                    if not retry_result.get("ok"):
+                        print(f"[DIZAYN] Admin {admin_id} qayta urinish ham muvaffaqiyatsiz: {retry_result.get('description')}")
             else:
-                await context.bot.send_message(chat_id=admin_id, text=admin_text, parse_mode="Markdown")
+                try:
+                    await context.bot.send_message(chat_id=admin_id, text=admin_text, parse_mode="Markdown")
+                except Exception:
+                    await context.bot.send_message(chat_id=admin_id, text=admin_text)
         except Exception as e:
             print(f"[DIZAYN] Admin {admin_id} xato: {e}")
 
@@ -1481,12 +1494,7 @@ async def faq_ask_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 ID: `{user.id}`\n\n"
         f"❓ Savol:\n{update.message.text}"
     )
-    try:
-        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
-        for admin_id in ADMIN_IDS:
-            await http_session.post(url, json={"chat_id": admin_id, "text": admin_text, "parse_mode": "Markdown"})
-    except Exception as e:
-        print(f"[FAQ] Xato: {e}")
+    await _notify_admins(admin_text, log_tag="FAQ")
 
     context.user_data.pop("awaiting_faq_ask", None)
     await update.message.reply_text(t["faq_ask_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
@@ -1521,12 +1529,7 @@ async def taklif_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{phone_line}\n\n"
         f"💬 Taklif:\n{update.message.text}"
     )
-    try:
-        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
-        for admin_id in ADMIN_IDS:
-            await http_session.post(url, json={"chat_id": admin_id, "text": admin_text, "parse_mode": "Markdown"})
-    except Exception as e:
-        print(f"Taklif yuborishda xato: {e}")
+    await _notify_admins(admin_text, log_tag="TAKLIF")
 
     context.user_data.pop("awaiting_taklif", None)
     await update.message.reply_text(t["taklif_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
@@ -1587,12 +1590,7 @@ async def _save_sotuvchi(update: Update, context: ContextTypes.DEFAULT_TYPE, pho
         f"🆔 ID: `{user.id}`\n"
         f"📞 Telefon: {phone}"
     )
-    try:
-        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
-        for admin_id in ADMIN_IDS:
-            await http_session.post(url, json={"chat_id": admin_id, "text": admin_text, "parse_mode": "Markdown"})
-    except Exception as e:
-        print(f"[SOTUVCHI] Admin xabar yuborishda xato: {e}")
+    await _notify_admins(admin_text, log_tag="SOTUVCHI")
 
     await _sotuvchi_return_to_menu(update, context, lang, t["sotuvchi_done"])
 
@@ -1667,7 +1665,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         await update.message.reply_text("⛔ Ruxsat yo'q.")
         return
-    total = len(user_lang) if user_lang else 0
+    total = len(load_users())
     await update.message.reply_text(
         f"👨‍💼 *Admin panel*\n\n"
         f"👥 Foydalanuvchilar: {total} ta\n\n"
@@ -1685,9 +1683,9 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     text = " ".join(context.args)
     sent, failed = 0, 0
-    for uid in list(user_lang.keys()):
+    for uid in load_users().keys():
         try:
-            await context.bot.send_message(chat_id=uid, text=f"📢 *ASOX Market:*\n\n{text}", parse_mode="Markdown")
+            await context.bot.send_message(chat_id=int(uid), text=f"📢 *ASOX Market:*\n\n{text}", parse_mode="Markdown")
             sent += 1
         except Exception:
             failed += 1

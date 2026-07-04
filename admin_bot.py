@@ -3,7 +3,7 @@ import json
 import aiohttp
 from datetime import date
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters, PicklePersistence
 
 load_dotenv()
@@ -464,9 +464,24 @@ async def approve_seller_callback(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         print(f"[APPROVE_SELLER] Xato: {e}")
 
+async def post_init(app):
+    try:
+        await app.bot.set_my_commands([
+            BotCommand("start", "Bot haqida ma'lumot"),
+            BotCommand("tayyor", "Buyurtma tayyor - foydalanuvchiga xabar"),
+            BotCommand("yetkazildi", "Yetkazib berildi - foydalanuvchiga xabar"),
+            BotCommand("bekor", "Buyurtma bekor qilindi - foydalanuvchiga xabar"),
+            BotCommand("xabar", "Foydalanuvchiga maxsus xabar yuborish"),
+            BotCommand("aksiyalar", "Faol aksiyalar ro'yxati"),
+            BotCommand("aksiya_qush", "Yangi aksiya qo'shish"),
+            BotCommand("aksiya_ochir", "Aksiyani o'chirish"),
+        ])
+    except Exception as e:
+        print(f"[COMMANDS] Komandalar menyusini o'rnatishda xato: {e}")
+
 def main():
     persistence = PicklePersistence(filepath="/home/muxa/admin_bot_data.pickle")
-    app = Application.builder().token(ADMIN_BOT_TOKEN).connect_timeout(30).read_timeout(30).persistence(persistence).build()
+    app = Application.builder().token(ADMIN_BOT_TOKEN).connect_timeout(30).read_timeout(30).post_init(post_init).persistence(persistence).build()
 
     xabar_conv = ConversationHandler(
         entry_points=[CommandHandler("xabar", xabar_start)],

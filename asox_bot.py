@@ -3,7 +3,7 @@ import json
 import asyncio
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters, PicklePersistence
 
 import aiohttp
@@ -13,6 +13,7 @@ USERS_FILE = "/home/muxa/users.json"
 PROMOTIONS_FILE = "/home/muxa/promotions.json"
 SELLERS_FILE = "/home/muxa/sellers.json"
 SELLER_WHITELIST_FILE = "/home/muxa/seller_whitelist.json"
+REQUEST_COUNTER_FILE = "/home/muxa/request_counter.json"
 
 def load_promotions():
     try:
@@ -141,6 +142,17 @@ def is_phone_whitelisted(phone):
     if not target:
         return False
     return any(normalize_phone(p) == target for p in load_seller_whitelist())
+
+def next_request_id():
+    try:
+        with open(REQUEST_COUNTER_FILE, "r") as f:
+            n = json.load(f).get("counter", 0)
+    except Exception:
+        n = 0
+    n += 1
+    with open(REQUEST_COUNTER_FILE, "w") as f:
+        json.dump({"counter": n}, f)
+    return f"A{1000 + n}"
 
 load_dotenv()
 
@@ -280,16 +292,16 @@ TEXTS = {
         "izoh_skip_btn": "⏭ O'tkazib yuborish",
         "btn_taklif": "💡 Taklif kiritish",
         "taklif_prompt": "💡 *Taklifingizni yozing*\n\nQanday mahsulot yoki xizmat qo'shishimizni xohlaysiz?",
-        "taklif_done": "✅ *Taklifingiz qabul qilindi! Rahmat!*",
+        "taklif_done": "✅ *Taklifingiz qabul qilindi! Rahmat!*\n\n🔖 So'rov raqami: #{id}",
         "taklif_cancel_btn": "❌ Bekor qilish",
         "btn_faq_ask": "✍️ Savol berish",
         "faq_ask_prompt": "✍️ *Savolingizni yozing*\n\nMutaxassislarimiz tez orada javob beradi:",
-        "faq_ask_done": "✅ *Savolingiz qabul qilindi! Tez orada javob beramiz.*",
+        "faq_ask_done": "✅ *Savolingiz qabul qilindi! Tez orada javob beramiz.*\n\n🔖 So'rov raqami: #{id}",
         "faq_ask_cancel_btn": "❌ Bekor qilish",
         "narx_prompt": "💰 *Dizayningizga qancha narx bera olasiz?*\n\nFaqat raqam kiriting _(masalan: 50, 100, 200)_\nBot avtomatik so'mga o'tkazadi.",
         "narx_invalid": "❗ Iltimos, faqat raqam kiriting _(masalan: 50, 100, 200)_",
         "narx_skip_btn": "⏭ O'tkazib yuborish",
-        "narx_done": "✅ *Rahmat! Ma'lumotlaringiz qabul qilindi.*\n\nTez orada mutaxassislarimiz siz bilan bog'lanadi!",
+        "narx_done": "✅ *Rahmat! Ma'lumotlaringiz qabul qilindi.*\n\nTez orada mutaxassislarimiz siz bilan bog'lanadi!\n\n🔖 So'rov raqami: #{id}",
         "lang_changed": "✅ Til o'zgartirildi!",
         "btn_faq": "❓ FAQ",
         "faq_title": "❓ *FAQ*\n\nQaysi bo'lim sizni qiziqtiradi?",
@@ -352,7 +364,8 @@ TEXTS = {
         "btn_sotuvchi": "🏪 Men sotuvchiman",
         "sotuvchi_not_yet": (
             "⏳ *Siz hali sotuvchi emassiz.*\n\n"
-            "So'rovingiz administratorga yuborildi. Tasdiqlangach, sizga xabar beramiz."
+            "So'rovingiz administratorga yuborildi. Tasdiqlangach, sizga xabar beramiz.\n\n"
+            "🔖 So'rov raqami: #{id}"
         ),
         "sotuvchi_prompt": (
             "🏪 *Sotuvchi sifatida ro'yxatdan o'tish*\n\n"
@@ -499,16 +512,16 @@ TEXTS = {
         "izoh_skip_btn": "⏭ Пропустить",
         "btn_taklif": "💡 Оставить предложение",
         "taklif_prompt": "💡 *Напишите ваше предложение*\n\nКакой товар или услугу вы хотите видеть у нас?",
-        "taklif_done": "✅ *Ваше предложение принято! Спасибо!*",
+        "taklif_done": "✅ *Ваше предложение принято! Спасибо!*\n\n🔖 Номер запроса: #{id}",
         "taklif_cancel_btn": "❌ Отмена",
         "btn_faq_ask": "✍️ Задать вопрос",
         "faq_ask_prompt": "✍️ *Напишите ваш вопрос*\n\nНаши специалисты скоро ответят:",
-        "faq_ask_done": "✅ *Ваш вопрос принят! Скоро ответим.*",
+        "faq_ask_done": "✅ *Ваш вопрос принят! Скоро ответим.*\n\n🔖 Номер запроса: #{id}",
         "faq_ask_cancel_btn": "❌ Отмена",
         "narx_prompt": "💰 *Сколько вы готовы заплатить за дизайн?*\n\nВведите только цифру _(например: 50, 100, 200)_\nБот автоматически переведёт в сумы.",
         "narx_invalid": "❗ Пожалуйста, введите только цифру _(например: 50, 100, 200)_",
         "narx_skip_btn": "⏭ Пропустить",
-        "narx_done": "✅ *Спасибо! Ваша информация принята.*\n\nНаши специалисты свяжутся с вами в ближайшее время!",
+        "narx_done": "✅ *Спасибо! Ваша информация принята.*\n\nНаши специалисты свяжутся с вами в ближайшее время!\n\n🔖 Номер запроса: #{id}",
         "lang_changed": "✅ Язык изменён!",
         "btn_faq": "❓ Часто задаваемые вопросы",
         "faq_title": "❓ *Часто задаваемые вопросы*\n\nКакой раздел вас интересует?",
@@ -571,7 +584,8 @@ TEXTS = {
         "btn_sotuvchi": "🏪 Я продавец",
         "sotuvchi_not_yet": (
             "⏳ *Вы ещё не продавец.*\n\n"
-            "Ваш запрос отправлен администратору. Мы сообщим вам после подтверждения."
+            "Ваш запрос отправлен администратору. Мы сообщим вам после подтверждения.\n\n"
+            "🔖 Номер запроса: #{id}"
         ),
         "sotuvchi_prompt": (
             "🏪 *Регистрация продавца*\n\n"
@@ -718,16 +732,16 @@ TEXTS = {
         "izoh_skip_btn": "⏭ Skip",
         "btn_taklif": "💡 Leave a suggestion",
         "taklif_prompt": "💡 *Write your suggestion*\n\nWhat product or service would you like us to add?",
-        "taklif_done": "✅ *Your suggestion has been accepted! Thank you!*",
+        "taklif_done": "✅ *Your suggestion has been accepted! Thank you!*\n\n🔖 Request ID: #{id}",
         "taklif_cancel_btn": "❌ Cancel",
         "btn_faq_ask": "✍️ Ask a question",
         "faq_ask_prompt": "✍️ *Write your question*\n\nOur specialists will reply soon:",
-        "faq_ask_done": "✅ *Your question has been received! We'll reply soon.*",
+        "faq_ask_done": "✅ *Your question has been received! We'll reply soon.*\n\n🔖 Request ID: #{id}",
         "faq_ask_cancel_btn": "❌ Cancel",
         "narx_prompt": "💰 *How much would you pay for the design?*\n\nEnter only a number _(e.g.: 50, 100, 200)_\nThe bot will automatically convert to soums.",
         "narx_invalid": "❗ Please enter only a number _(e.g.: 50, 100, 200)_",
         "narx_skip_btn": "⏭ Skip",
-        "narx_done": "✅ *Thank you! Your information has been received.*\n\nOur specialists will contact you shortly!",
+        "narx_done": "✅ *Thank you! Your information has been received.*\n\nOur specialists will contact you shortly!\n\n🔖 Request ID: #{id}",
         "lang_changed": "✅ Language changed!",
         "btn_faq": "❓ FAQ",
         "faq_title": "❓ *Frequently Asked Questions*\n\nWhich section interests you?",
@@ -790,7 +804,8 @@ TEXTS = {
         "btn_sotuvchi": "🏪 I'm a seller",
         "sotuvchi_not_yet": (
             "⏳ *You are not a seller yet.*\n\n"
-            "Your request has been sent to the administrator. We'll notify you once approved."
+            "Your request has been sent to the administrator. We'll notify you once approved.\n\n"
+            "🔖 Request ID: #{id}"
         ),
         "sotuvchi_prompt": (
             "🏪 *Seller registration*\n\n"
@@ -984,6 +999,23 @@ async def post_init(app):
         bot_photo_id = None
     _promo_task = asyncio.create_task(promo_check_loop(app))
     await start_order_api(app)
+
+    try:
+        await app.bot.set_my_commands([
+            BotCommand("start", "Botni ishga tushirish / qayta boshlash"),
+        ])
+        admin_commands = [
+            BotCommand("start", "Botni ishga tushirish / qayta boshlash"),
+            BotCommand("admin", "Admin panel"),
+            BotCommand("xabar", "Barcha foydalanuvchilarga xabar yuborish"),
+        ]
+        for admin_id in ADMIN_IDS:
+            try:
+                await app.bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[COMMANDS] Komandalar menyusini o'rnatishda xato: {e}")
 
 async def post_shutdown(app):
     if _promo_task and not _promo_task.done():
@@ -1200,13 +1232,14 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photos = context.user_data.get("pending_photos", [])
         products = context.user_data.get("pending_products", [])
         izoh_text = context.user_data.get("saved_izoh", "")
+        request_id = next_request_id()
         for file_id, product in zip(photos, products):
-            await _send_to_admin(file_id, product, user, context, izoh=izoh_text, narx="")
+            await _send_to_admin(file_id, product, user, context, izoh=izoh_text, narx="", request_id=request_id)
         context.user_data.pop("saved_izoh", None)
         context.user_data.pop("pending_photos", None)
         context.user_data.pop("pending_products", None)
         context.user_data.pop("pending_user", None)
-        await query.message.reply_text(t["narx_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
+        await query.message.reply_text(t["narx_done"].format(id=request_id), parse_mode="Markdown", reply_markup=main_menu(lang))
     elif data == "design_cancel":
         context.user_data.pop("awaiting_design", None)
         context.user_data.pop("design_product", None)
@@ -1294,12 +1327,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=sotuvchi_phone_keyboard(t)
                 )
             else:
-                await edit_msg(query, t["sotuvchi_not_yet"], main_menu(lang))
                 last_sent = context.user_data.get("seller_request_sent_at")
+                request_id = context.user_data.get("seller_request_id", "")
                 now = datetime.now()
                 if not last_sent or now - datetime.fromisoformat(last_sent) > SELLER_REQUEST_COOLDOWN:
+                    request_id = next_request_id()
                     context.user_data["seller_request_sent_at"] = now.isoformat()
-                    await _notify_admin_seller_request(query.from_user, phone, context)
+                    context.user_data["seller_request_id"] = request_id
+                    await _notify_admin_seller_request(query.from_user, phone, context, request_id)
+                await edit_msg(query, t["sotuvchi_not_yet"].format(id=request_id or "—"), main_menu(lang))
     elif data == "sotuvchi_update":
         context.user_data["awaiting_sotuvchi"] = True
         await query.message.reply_text(
@@ -1330,14 +1366,14 @@ async def _notify_admins(text, reply_markup=None, log_tag="ADMIN XABAR"):
         except Exception as e:
             print(f"[{log_tag}] {admin_id} ga yuborishda xato: {e}")
 
-async def _notify_admin_seller_request(user, phone, context):
+async def _notify_admin_seller_request(user, phone, context, request_id=""):
     reg_name = context.user_data.get("name", "")
     name_line = reg_name if reg_name else (user.full_name or "")
     username = f"@{user.username}" if user.username else "username yo'q"
     phone_line = f"\n📞 Telefon: {phone}" if phone else ""
 
     admin_text = (
-        f"🏪 *'Men sotuvchiman' bosildi*\n\n"
+        f"🏪 *'Men sotuvchiman' bosildi* #{request_id}\n\n"
         f"👤 Ism: {name_line}\n"
         f"💬 Telegram: {username}\n"
         f"🆔 ID: `{user.id}`"
@@ -1351,7 +1387,7 @@ async def _notify_admin_seller_request(user, phone, context):
     }
     await _notify_admins(admin_text, reply_markup=keyboard, log_tag="SOTUVCHI_SOROV")
 
-async def _send_to_admin(file_id, product, user, context, izoh="", narx=""):
+async def _send_to_admin(file_id, product, user, context, izoh="", narx="", request_id=""):
     reg_name = context.user_data.get("name", "")
     reg_phone = context.user_data.get("phone", "")
     name_line = reg_name if reg_name else (user.full_name or "")
@@ -1361,7 +1397,7 @@ async def _send_to_admin(file_id, product, user, context, izoh="", narx=""):
     narx_line = f"\n💰 Narx taklifi: {narx}" if narx else ""
 
     admin_text = (
-        f"🎨 *Yangi dizayn so'rovi!*\n\n"
+        f"🎨 *Yangi dizayn so'rovi!* #{request_id}\n\n"
         f"👤 Ism: {name_line}\n"
         f"💬 Telegram: {username}\n"
         f"🆔 ID: `{user.id}`"
@@ -1500,8 +1536,9 @@ async def faq_ask_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name_line = reg_name if reg_name else (user.full_name or "")
     username = f"@{user.username}" if user.username else "username yo'q"
 
+    request_id = next_request_id()
     admin_text = (
-        f"❓ *Foydalanuvchidan savol!*\n\n"
+        f"❓ *Foydalanuvchidan savol!* #{request_id}\n\n"
         f"👤 Ism: {name_line}\n"
         f"💬 Telegram: {username}\n"
         f"🆔 ID: `{user.id}`\n\n"
@@ -1510,7 +1547,7 @@ async def faq_ask_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _notify_admins(admin_text, log_tag="FAQ")
 
     context.user_data.pop("awaiting_faq_ask", None)
-    await update.message.reply_text(t["faq_ask_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
+    await update.message.reply_text(t["faq_ask_done"].format(id=request_id), parse_mode="Markdown", reply_markup=main_menu(lang))
 
 async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_narx"):
@@ -1534,8 +1571,9 @@ async def taklif_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = f"@{user.username}" if user.username else "username yo'q"
     phone_line = f"\n📞 Telefon: {reg_phone}" if reg_phone else ""
 
+    request_id = next_request_id()
     admin_text = (
-        f"💡 *Yangi taklif!*\n\n"
+        f"💡 *Yangi taklif!* #{request_id}\n\n"
         f"👤 Ism: {name_line}\n"
         f"💬 Telegram: {username}\n"
         f"🆔 ID: `{user.id}`"
@@ -1545,7 +1583,7 @@ async def taklif_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _notify_admins(admin_text, log_tag="TAKLIF")
 
     context.user_data.pop("awaiting_taklif", None)
-    await update.message.reply_text(t["taklif_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
+    await update.message.reply_text(t["taklif_done"].format(id=request_id), parse_mode="Markdown", reply_markup=main_menu(lang))
 
 async def narx_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_narx"):
@@ -1565,16 +1603,17 @@ async def narx_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     izoh_text = context.user_data.get("saved_izoh", "")
     photos = context.user_data.get("pending_photos", [])
     products = context.user_data.get("pending_products", [])
+    request_id = next_request_id()
 
     for file_id, product in zip(photos, products):
-        await _send_to_admin(file_id, product, user, context, izoh=izoh_text, narx=narx_formatted)
+        await _send_to_admin(file_id, product, user, context, izoh=izoh_text, narx=narx_formatted, request_id=request_id)
 
     context.user_data.pop("awaiting_narx", None)
     context.user_data.pop("saved_izoh", None)
     context.user_data.pop("pending_photos", None)
     context.user_data.pop("pending_products", None)
     context.user_data.pop("pending_user", None)
-    await update.message.reply_text(t["narx_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
+    await update.message.reply_text(t["narx_done"].format(id=request_id), parse_mode="Markdown", reply_markup=main_menu(lang))
 
 async def _sotuvchi_return_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang, text_msg):
     t = TEXTS[lang]

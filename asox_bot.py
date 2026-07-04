@@ -971,8 +971,10 @@ async def promo_check_loop(app):
         except Exception as e:
             print(f"[Promo check] Xato: {e}")
 
+_promo_task = None
+
 async def post_init(app):
-    global bot_photo_id, http_session
+    global bot_photo_id, http_session, _promo_task
     http_session = aiohttp.ClientSession()
     try:
         photos = await app.bot.get_user_profile_photos(user_id=app.bot.id)
@@ -980,8 +982,18 @@ async def post_init(app):
             bot_photo_id = photos.photos[0][0].file_id
     except Exception:
         bot_photo_id = None
-    asyncio.create_task(promo_check_loop(app))
+    _promo_task = asyncio.create_task(promo_check_loop(app))
     await start_order_api(app)
+
+async def post_shutdown(app):
+    if _promo_task and not _promo_task.done():
+        _promo_task.cancel()
+        try:
+            await _promo_task
+        except asyncio.CancelledError:
+            pass
+    if http_session:
+        await http_session.close()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1723,7 +1735,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     persistence = PicklePersistence(filepath="/home/muxa/asox_bot_data.pickle")
-    app = Application.builder().token(TOKEN).connect_timeout(30).read_timeout(30).post_init(post_init).persistence(persistence).build()
+    app = Application.builder().token(TOKEN).connect_timeout(30).read_timeout(30).post_init(post_init).post_shutdown(post_shutdown).persistence(persistence).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],

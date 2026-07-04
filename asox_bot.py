@@ -1635,16 +1635,45 @@ async def handle_order_notify(request):
         return web.json_response({"ok": False, "error": "seller not found"}, status=404)
 
     seller_id, seller = result
+
+    lines = ["🛒 *Sizga zakaz keldi!*\n"]
+    order_id = data.get("order_id", "")
+    product = data.get("product", "")
+    quantity = data.get("quantity", "")
+    price = data.get("price", "")
+    customer_name = data.get("customer_name", "")
+    customer_phone = data.get("customer_phone", "")
+    address = data.get("address", "")
+    comment = data.get("comment", "")
+
+    if order_id:
+        lines.append(f"🧾 Buyurtma raqami: `{order_id}`")
+    if product:
+        lines.append(f"📦 Mahsulot: {product}")
+    if quantity:
+        lines.append(f"🔢 Miqdor: {quantity}")
+    if price:
+        lines.append(f"💰 Narx: {price}")
+    if customer_name:
+        lines.append(f"👤 Mijoz: {customer_name}")
+    if customer_phone:
+        lines.append(f"📞 Mijoz telefoni: {customer_phone}")
+    if address:
+        lines.append(f"📍 Manzil: {address}")
+    if comment:
+        lines.append(f"📝 Izoh: {comment}")
+    lines.append("\n🌐 Batafsil ma'lumot uchun https://asox.uz/ ga kiring.")
+    text = "\n".join(lines)
+
     bot_app = request.app["bot_app"]
     try:
-        await bot_app.bot.send_message(
-            chat_id=int(seller_id),
-            text="🛒 *Sizga zakaz keldi!*\n\nBatafsil ma'lumot uchun https://asox.uz/ ga kiring.",
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        print(f"[ORDER API] Sotuvchiga xabar yuborishda xato: {e}")
-        return web.json_response({"ok": False, "error": "send failed"}, status=500)
+        await bot_app.bot.send_message(chat_id=int(seller_id), text=text, parse_mode="Markdown")
+    except Exception:
+        try:
+            await bot_app.bot.send_message(chat_id=int(seller_id), text=text)
+        except Exception as e:
+            print(f"[ORDER API] Sotuvchiga xabar yuborishda xato: {e}")
+            return web.json_response({"ok": False, "error": "send failed"}, status=500)
 
     return web.json_response({"ok": True})
 

@@ -7,9 +7,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Keyboar
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 import aiohttp
+from aiohttp import web
 
 USERS_FILE = "/home/muxa/users.json"
 PROMOTIONS_FILE = "/home/muxa/promotions.json"
+SELLERS_FILE = "/home/muxa/sellers.json"
+SELLER_WHITELIST_FILE = "/home/muxa/seller_whitelist.json"
 
 def load_promotions():
     try:
@@ -89,11 +92,63 @@ def save_lang(user_id, lang):
 def get_user(user_id):
     return load_users().get(str(user_id))
 
+def load_sellers():
+    try:
+        with open(SELLERS_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_seller(user_id, name, phone, username):
+    sellers = load_sellers()
+    sellers[str(user_id)] = {
+        "name": name,
+        "phone": phone,
+        "username": username,
+        "registered_at": datetime.now().isoformat(),
+    }
+    with open(SELLERS_FILE, "w") as f:
+        json.dump(sellers, f, ensure_ascii=False, indent=2)
+
+def normalize_phone(phone):
+    return "".join(ch for ch in phone if ch.isdigit())[-9:]
+
+def get_seller(user_id):
+    return load_sellers().get(str(user_id))
+
+def find_seller_by_phone(phone):
+    target = normalize_phone(phone)
+    if not target:
+        return None
+    for uid, data in load_sellers().items():
+        if normalize_phone(data.get("phone", "")) == target:
+            return uid, data
+    return None
+
+def is_valid_phone(phone):
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return 7 <= len(digits) <= 15
+
+def load_seller_whitelist():
+    try:
+        with open(SELLER_WHITELIST_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def is_phone_whitelisted(phone):
+    target = normalize_phone(phone or "")
+    if not target:
+        return False
+    return any(normalize_phone(p) == target for p in load_seller_whitelist())
+
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN")
 ADMIN_IDS = [int(os.getenv("ADMIN_ID")), int(os.getenv("ADMIN_ID2"))]
+ORDER_API_KEY = os.getenv("ORDER_API_KEY", "")
+ORDER_API_PORT = int(os.getenv("ORDER_API_PORT", "8088"))
 
 ASK_NAME, ASK_PHONE, DESIGN_CHOOSE, DESIGN_PHOTO = range(4)
 
@@ -293,6 +348,29 @@ TEXTS = {
             "🕐 Tez orada mutaxassislarimiz siz bilan bog'lanadi!"
         ),
         "design_cancel_btn": "❌ Bekor qilish",
+        "btn_sotuvchi": "🏪 Men sotuvchiman",
+        "sotuvchi_not_yet": (
+            "⏳ *Siz hali sotuvchi emassiz.*\n\n"
+            "So'rovingiz administratorga yuborildi. Tasdiqlangach, sizga xabar beramiz."
+        ),
+        "sotuvchi_prompt": (
+            "🏪 *Sotuvchi sifatida ro'yxatdan o'tish*\n\n"
+            "Telefon raqamingizni kiriting yoki quyidagi tugma orqali ulashing _(masalan: +998901234567)_:"
+        ),
+        "sotuvchi_invalid": "❗ Iltimos, to'g'ri telefon raqam kiriting _(masalan: +998901234567)_",
+        "sotuvchi_done": (
+            "✅ *Siz sotuvchi sifatida ro'yxatdan o'tdingiz!*\n\n"
+            "Asox.uz orqali sizga zakaz kelganda shu botdan xabar beramiz."
+        ),
+        "sotuvchi_cancel_btn": "❌ Bekor qilish",
+        "sotuvchi_cancelled": "❌ Bekor qilindi.",
+        "btn_sotuvchi_contact": "📱 Kontaktni ulashish",
+        "sotuvchi_panel_title": (
+            "🏪 *Siz sotuvchi sifatida ro'yxatdan o'tgansiz*\n\n"
+            "📞 Telefon: {phone}\n\n"
+            "Asox.uz orqali sizga zakaz kelganda shu botdan xabar beramiz."
+        ),
+        "btn_sotuvchi_update": "🔄 Telefonni yangilash",
     },
     "ru": {
         "welcome": (
@@ -489,6 +567,29 @@ TEXTS = {
             "🕐 Наши специалисты свяжутся с вами в ближайшее время!"
         ),
         "design_cancel_btn": "❌ Отмена",
+        "btn_sotuvchi": "🏪 Я продавец",
+        "sotuvchi_not_yet": (
+            "⏳ *Вы ещё не продавец.*\n\n"
+            "Ваш запрос отправлен администратору. Мы сообщим вам после подтверждения."
+        ),
+        "sotuvchi_prompt": (
+            "🏪 *Регистрация продавца*\n\n"
+            "Введите номер телефона или поделитесь им через кнопку ниже _(например: +998901234567)_:"
+        ),
+        "sotuvchi_invalid": "❗ Пожалуйста, введите корректный номер телефона _(например: +998901234567)_",
+        "sotuvchi_done": (
+            "✅ *Вы зарегистрированы как продавец!*\n\n"
+            "Когда на Asox.uz придёт заказ для вас, мы сообщим об этом в этом боте."
+        ),
+        "sotuvchi_cancel_btn": "❌ Отмена",
+        "sotuvchi_cancelled": "❌ Отменено.",
+        "btn_sotuvchi_contact": "📱 Поделиться контактом",
+        "sotuvchi_panel_title": (
+            "🏪 *Вы зарегистрированы как продавец*\n\n"
+            "📞 Телефон: {phone}\n\n"
+            "Когда на Asox.uz придёт заказ для вас, мы сообщим об этом в этом боте."
+        ),
+        "btn_sotuvchi_update": "🔄 Обновить телефон",
     },
     "en": {
         "welcome": (
@@ -685,6 +786,29 @@ TEXTS = {
             "🕐 Our specialists will contact you shortly!"
         ),
         "design_cancel_btn": "❌ Cancel",
+        "btn_sotuvchi": "🏪 I'm a seller",
+        "sotuvchi_not_yet": (
+            "⏳ *You are not a seller yet.*\n\n"
+            "Your request has been sent to the administrator. We'll notify you once approved."
+        ),
+        "sotuvchi_prompt": (
+            "🏪 *Seller registration*\n\n"
+            "Enter your phone number or share it with the button below _(e.g.: +998901234567)_:"
+        ),
+        "sotuvchi_invalid": "❗ Please enter a valid phone number _(e.g.: +998901234567)_",
+        "sotuvchi_done": (
+            "✅ *You are now registered as a seller!*\n\n"
+            "When you get an order on Asox.uz, we'll notify you here."
+        ),
+        "sotuvchi_cancel_btn": "❌ Cancel",
+        "sotuvchi_cancelled": "❌ Cancelled.",
+        "btn_sotuvchi_contact": "📱 Share contact",
+        "sotuvchi_panel_title": (
+            "🏪 *You are registered as a seller*\n\n"
+            "📞 Phone: {phone}\n\n"
+            "When you get an order on Asox.uz, we'll notify you here."
+        ),
+        "btn_sotuvchi_update": "🔄 Update phone",
     }
 }
 
@@ -751,6 +875,7 @@ def main_menu(lang):
         [InlineKeyboardButton(t["btn_contact"], callback_data="contact")],
         [InlineKeyboardButton(t["btn_site"], url="https://asox.uz/")],
         [InlineKeyboardButton(t["btn_faq"], callback_data="faq")],
+        [InlineKeyboardButton(t["btn_sotuvchi"], callback_data="sotuvchi")],
         [InlineKeyboardButton(t["btn_lang"], callback_data="lang")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -804,6 +929,13 @@ def phone_keyboard():
     keyboard = [[KeyboardButton("📱 Kontakt qo'shish", request_contact=True)]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
+def sotuvchi_phone_keyboard(t):
+    keyboard = [
+        [KeyboardButton(t["btn_sotuvchi_contact"], request_contact=True)],
+        [KeyboardButton(t["sotuvchi_cancel_btn"])],
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+
 async def promo_check_loop(app):
     while True:
         try:
@@ -849,6 +981,7 @@ async def post_init(app):
     except Exception:
         bot_photo_id = None
     asyncio.create_task(promo_check_loop(app))
+    await start_order_api(app)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1128,8 +1261,66 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_lang[user_id] = "en"
         save_lang(user_id, "en")
         await edit_msg(query, TEXTS["en"]["lang_changed"] + "\n\n" + TEXTS["en"]["welcome"], main_menu("en"))
+    elif data == "sotuvchi":
+        seller = get_seller(user_id)
+        if seller:
+            await edit_msg(
+                query,
+                t["sotuvchi_panel_title"].format(phone=seller.get("phone", "")),
+                InlineKeyboardMarkup([
+                    [InlineKeyboardButton(t["btn_sotuvchi_update"], callback_data="sotuvchi_update")],
+                    [InlineKeyboardButton(t["btn_back"], callback_data="back")],
+                ])
+            )
+        else:
+            saved = get_user(user_id)
+            phone = (saved or {}).get("phone") or context.user_data.get("phone", "")
+            if is_phone_whitelisted(phone):
+                context.user_data["awaiting_sotuvchi"] = True
+                await query.message.reply_text(
+                    t["sotuvchi_prompt"], parse_mode="Markdown",
+                    reply_markup=sotuvchi_phone_keyboard(t)
+                )
+            else:
+                await edit_msg(query, t["sotuvchi_not_yet"], main_menu(lang))
+                await _notify_admin_seller_request(query.from_user, phone, context)
+    elif data == "sotuvchi_update":
+        context.user_data["awaiting_sotuvchi"] = True
+        await query.message.reply_text(
+            t["sotuvchi_prompt"], parse_mode="Markdown",
+            reply_markup=sotuvchi_phone_keyboard(t)
+        )
     elif data == "back":
         await edit_msg(query, t["welcome"], main_menu(lang))
+
+async def _notify_admin_seller_request(user, phone, context):
+    reg_name = context.user_data.get("name", "")
+    name_line = reg_name if reg_name else (user.full_name or "")
+    username = f"@{user.username}" if user.username else "username yo'q"
+    phone_line = f"\n📞 Telefon: {phone}" if phone else ""
+
+    admin_text = (
+        f"🏪 *'Men sotuvchiman' bosildi*\n\n"
+        f"👤 Ism: {name_line}\n"
+        f"💬 Telegram: {username}\n"
+        f"🆔 ID: `{user.id}`"
+        f"{phone_line}\n\n"
+        f"Bu odamni sotuvchilar ro'yxatiga qo'shasizmi?"
+    )
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ Ha, qo'shish", "callback_data": f"approve_seller_{user.id}"}
+        ]]
+    }
+    try:
+        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
+        for admin_id in ADMIN_IDS:
+            await http_session.post(url, json={
+                "chat_id": admin_id, "text": admin_text,
+                "parse_mode": "Markdown", "reply_markup": keyboard
+            })
+    except Exception as e:
+        print(f"[SOTUVCHI_SOROV] Admin xabar yuborishda xato: {e}")
 
 async def _send_to_admin(file_id, product, user, context, izoh="", narx=""):
     reg_name = context.user_data.get("name", "")
@@ -1295,6 +1486,8 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await taklif_received(update, context)
     elif context.user_data.get("awaiting_faq_ask"):
         await faq_ask_received(update, context)
+    elif context.user_data.get("awaiting_sotuvchi"):
+        await sotuvchi_received(update, context)
 
 async def taklif_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1353,6 +1546,109 @@ async def narx_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("pending_user", None)
     await update.message.reply_text(t["narx_done"], parse_mode="Markdown", reply_markup=main_menu(lang))
 
+async def _sotuvchi_return_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang, text_msg):
+    t = TEXTS[lang]
+    await update.message.reply_text(text_msg, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+    if bot_photo_id:
+        await update.message.reply_photo(
+            photo=bot_photo_id, caption=t["welcome"], parse_mode="Markdown", reply_markup=main_menu(lang)
+        )
+    else:
+        await update.message.reply_text(t["welcome"], parse_mode="Markdown", reply_markup=main_menu(lang))
+
+async def _save_sotuvchi(update: Update, context: ContextTypes.DEFAULT_TYPE, phone):
+    user = update.effective_user
+    lang = get_lang(user.id)
+    t = TEXTS[lang]
+    context.user_data.pop("awaiting_sotuvchi", None)
+    reg_name = context.user_data.get("name", "")
+    name_line = reg_name if reg_name else (user.full_name or "")
+    username = user.username or ""
+    save_seller(user.id, name_line, phone, username)
+
+    admin_text = (
+        f"🏪 *Yangi sotuvchi ro'yxatdan o'tdi!*\n\n"
+        f"👤 Ism: {name_line}\n"
+        f"💬 Telegram: @{username if username else 'yoq'}\n"
+        f"🆔 ID: `{user.id}`\n"
+        f"📞 Telefon: {phone}"
+    )
+    try:
+        url = f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/sendMessage"
+        for admin_id in ADMIN_IDS:
+            await http_session.post(url, json={"chat_id": admin_id, "text": admin_text, "parse_mode": "Markdown"})
+    except Exception as e:
+        print(f"[SOTUVCHI] Admin xabar yuborishda xato: {e}")
+
+    await _sotuvchi_return_to_menu(update, context, lang, t["sotuvchi_done"])
+
+async def sotuvchi_contact_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_sotuvchi"):
+        return
+    await _save_sotuvchi(update, context, update.message.contact.phone_number)
+
+async def sotuvchi_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_sotuvchi"):
+        return
+    user = update.effective_user
+    lang = get_lang(user.id)
+    t = TEXTS[lang]
+    text = update.message.text.strip()
+
+    if text == t["sotuvchi_cancel_btn"]:
+        context.user_data.pop("awaiting_sotuvchi", None)
+        await _sotuvchi_return_to_menu(update, context, lang, t["sotuvchi_cancelled"])
+        return
+
+    if not is_valid_phone(text):
+        await update.message.reply_text(
+            t["sotuvchi_invalid"], parse_mode="Markdown",
+            reply_markup=sotuvchi_phone_keyboard(t)
+        )
+        return
+
+    await _save_sotuvchi(update, context, text)
+
+async def handle_order_notify(request):
+    if not ORDER_API_KEY or request.headers.get("X-API-Key") != ORDER_API_KEY:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid json"}, status=400)
+
+    phone = str(data.get("phone", ""))
+    result = find_seller_by_phone(phone)
+    if not result:
+        return web.json_response({"ok": False, "error": "seller not found"}, status=404)
+
+    seller_id, seller = result
+    bot_app = request.app["bot_app"]
+    try:
+        await bot_app.bot.send_message(
+            chat_id=int(seller_id),
+            text="🛒 *Sizga zakaz keldi!*\n\nBatafsil ma'lumot uchun https://asox.uz/ ga kiring.",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        print(f"[ORDER API] Sotuvchiga xabar yuborishda xato: {e}")
+        return web.json_response({"ok": False, "error": "send failed"}, status=500)
+
+    return web.json_response({"ok": True})
+
+async def start_order_api(app):
+    if not ORDER_API_KEY:
+        print("[ORDER API] ORDER_API_KEY sozlanmagan, API o'chirilgan.")
+        return
+    web_app = web.Application()
+    web_app["bot_app"] = app
+    web_app.add_routes([web.post("/api/order-notify", handle_order_notify)])
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", ORDER_API_PORT)
+    await site.start()
+    print(f"[ORDER API] {ORDER_API_PORT}-portda ishga tushdi.")
+
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         await update.message.reply_text("⛔ Ruxsat yo'q.")
@@ -1399,6 +1695,7 @@ def main():
     )
 
     app.add_handler(conv_handler)
+    app.add_handler(MessageHandler(filters.CONTACT, sotuvchi_contact_received))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, design_photo_received))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
     app.add_handler(CommandHandler("admin", admin_panel))

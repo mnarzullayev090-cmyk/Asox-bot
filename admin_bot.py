@@ -3,7 +3,7 @@ import json
 import aiohttp
 from datetime import date
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
 load_dotenv()
@@ -12,9 +12,41 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(os.getenv("ADMIN_ID")), int(os.getenv("ADMIN_ID2"))]
 PROMOTIONS_FILE = "/home/muxa/promotions.json"
 USERS_FILE = "/home/muxa/users.json"
+SELLER_WHITELIST_FILE = "/home/muxa/seller_whitelist.json"
 
 ASK_NAME, ASK_EMOJI, ASK_DISCOUNT, ASK_DATE = range(4)
 ASK_MSG_ID, ASK_MSG_TEXT = range(4, 6)
+
+SELLER_LIST_BTN = "📋 Sotuvchilar ro'yxatini kiritish"
+SELLER_LIST_CANCEL_BTN = "❌ Bekor qilish"
+
+def admin_menu():
+    return ReplyKeyboardMarkup([[KeyboardButton(SELLER_LIST_BTN)]], resize_keyboard=True)
+
+def normalize_phone(phone):
+    return "".join(ch for ch in phone if ch.isdigit())[-9:]
+
+def load_seller_whitelist():
+    try:
+        with open(SELLER_WHITELIST_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def add_to_seller_whitelist(phones):
+    whitelist = load_seller_whitelist()
+    existing = {normalize_phone(p) for p in whitelist}
+    added = 0
+    for phone in phones:
+        norm = normalize_phone(phone)
+        if len(norm) < 7 or norm in existing:
+            continue
+        whitelist.append(phone)
+        existing.add(norm)
+        added += 1
+    with open(SELLER_WHITELIST_FILE, "w") as f:
+        json.dump(whitelist, f, ensure_ascii=False, indent=2)
+    return added, len(whitelist)
 
 def load_promotions():
     try:
@@ -65,7 +97,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/aksiyalar` — ro'yxat\n"
         "`/aksiya_qush` — qo'shish\n"
         "`/aksiya_ochir <raqam>` — o'chirish",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=admin_menu()
     )
 
 async def get_user_info(user_id):
@@ -318,6 +351,113 @@ async def aksiya_ochir(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+import re
+
+def extract_user_id_from_message(text):
+    """Xabar matnidan foydalanuvchi ID sini ajratib oladi."""
+    if not text:
+        return None
+    match = re.search(r'🆔 ID: `?(\d+)`?', text)
+    if match:
+        return int(match.group(1))
+    return None
+
+async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin xabarga reply qilganda foydalanuvchiga yuboradi."""
+    if not is_admin(update.effective_user.id):
+        return
+    msg = update.message
+    if not msg.reply_to_message:
+        return
+    original_text = msg.reply_to_message.text or ""
+    user_id = extract_user_id_from_message(original_text)
+    if not user_id:
+        return
+
+    saved = get_user(user_id)
+    name = saved.get("name", "") if saved else ""
+    murojaat = f"hurmatli *{name}*" if name else "hurmatli mijoz"
+    text = f"📩 *Assalomu aleykum, {murojaat}!*\n\n{msg.text}\n\n— ASOX Market"
+
+    try:
+        result = await send_to_user(user_id, text)
+        if result.get("ok"):
+            await msg.reply_text(f"✅ Javob {user_id} ga yuborildi.")
+        else:
+            await msg.reply_text(f"❌ Xato: {result.get('description')}")
+    except Exception as e:
+        await msg.reply_text(f"❌ Xato: {e}")
+
+async def seller_list_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if text == SELLER_LIST_CANCEL_BTN:
+        context.user_data.pop("awaiting_seller_list", None)
+        await update.message.reply_text("❌ Bekor qilindi.", reply_markup=admin_menu())
+        return
+
+    phones = [p.strip() for p in re.split(r"[,\n]+", text) if p.strip()]
+    added, total = add_to_seller_whitelist(phones)
+    context.user_data.pop("awaiting_seller_list", None)
+    await update.message.reply_text(
+        f"✅ {added} ta yangi raqam qo'shildi.\n📋 Jami sotuvchilar ro'yxatida: {total} ta raqam.",
+        reply_markup=admin_menu()
+    )
+
+async def admin_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    text = update.message.text.strip() if update.message.text else ""
+
+    if text == SELLER_LIST_BTN:
+        context.user_data["awaiting_seller_list"] = True
+        await update.message.reply_text(
+            "📋 *Sotuvchilar ro'yxati*\n\n"
+            "Telefon raqamlarni yuboring _(har birini yangi qatorda yoki vergul bilan ajratib)_:\n"
+            "_(masalan: +998901234567, +998907654321)_",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton(SELLER_LIST_CANCEL_BTN)]], resize_keyboard=True)
+        )
+        return
+
+    if context.user_data.get("awaiting_seller_list"):
+        await seller_list_received(update, context)
+        return
+
+    await admin_reply_handler(update, context)
+
+async def approve_seller_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("⛔ Ruxsat yo'q.", show_alert=True)
+        return
+    await query.answer()
+    try:
+        user_id = int(query.data.split("_")[-1])
+    except ValueError:
+        return
+
+    name, phone = await get_user_info(user_id)
+    if not phone:
+        await query.edit_message_text(query.message.text + "\n\n❌ Telefon raqami topilmadi.")
+        return
+
+    add_to_seller_whitelist([phone])
+    try:
+        await query.edit_message_text(query.message.text + "\n\n✅ Qo'shildi.")
+    except Exception:
+        pass
+
+    text = (
+        "✅ *So'rovingiz tasdiqlandi!*\n\n"
+        "Endi botda \"🏪 Men sotuvchiman\" tugmasini qayta bosing."
+    )
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json={"chat_id": user_id, "text": text, "parse_mode": "Markdown"})
+    except Exception as e:
+        print(f"[APPROVE_SELLER] Xato: {e}")
+
 def main():
     app = Application.builder().token(ADMIN_BOT_TOKEN).connect_timeout(30).read_timeout(30).build()
 
@@ -349,6 +489,8 @@ def main():
     app.add_handler(CommandHandler("aksiya_ochir", aksiya_ochir))
     app.add_handler(xabar_conv)
     app.add_handler(aksiya_conv)
+    app.add_handler(CallbackQueryHandler(approve_seller_callback, pattern=r"^approve_seller_\d+$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_router))
     print("✅ Admin bot ishga tushdi!")
     app.run_polling(drop_pending_updates=True)
 

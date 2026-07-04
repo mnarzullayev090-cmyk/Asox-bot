@@ -1,10 +1,14 @@
 import os
 import json
+import logging
 import aiohttp
 from datetime import date
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, BotCommand
+from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters, PicklePersistence
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN")
@@ -479,6 +483,12 @@ async def post_init(app):
     except Exception as e:
         print(f"[COMMANDS] Komandalar menyusini o'rnatishda xato: {e}")
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, Conflict):
+        logger.warning("Conflict: getUpdates to'qnashuvi (tarmoq uzilishi/qayta urinish): %s", context.error)
+        return
+    logger.error("Kutilmagan xatolik: %s", context.error, exc_info=context.error)
+
 def main():
     persistence = PicklePersistence(filepath="/home/muxa/admin_bot_data.pickle")
     app = Application.builder().token(ADMIN_BOT_TOKEN).connect_timeout(30).read_timeout(30).post_init(post_init).persistence(persistence).build()
@@ -519,6 +529,7 @@ def main():
     app.add_handler(aksiya_conv)
     app.add_handler(CallbackQueryHandler(approve_seller_callback, pattern=r"^approve_seller_\d+$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_router))
+    app.add_error_handler(error_handler)
     print("✅ Admin bot ishga tushdi!")
     app.run_polling(drop_pending_updates=True)
 

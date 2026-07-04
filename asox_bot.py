@@ -1,13 +1,17 @@
 import os
 import json
 import asyncio
+import logging
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, BotCommandScopeChat
+from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters, PicklePersistence
 
 import aiohttp
 from aiohttp import web
+
+logger = logging.getLogger(__name__)
 
 USERS_FILE = "/home/muxa/users.json"
 PROMOTIONS_FILE = "/home/muxa/promotions.json"
@@ -1772,6 +1776,12 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             failed += 1
     await update.message.reply_text(f"✅ Yuborildi: {sent} ta\n❌ Xato: {failed} ta")
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, Conflict):
+        logger.warning("Conflict: getUpdates to'qnashuvi (tarmoq uzilishi/qayta urinish): %s", context.error)
+        return
+    logger.error("Kutilmagan xatolik: %s", context.error, exc_info=context.error)
+
 def main():
     persistence = PicklePersistence(filepath="/home/muxa/asox_bot_data.pickle")
     app = Application.builder().token(TOKEN).connect_timeout(30).read_timeout(30).post_init(post_init).post_shutdown(post_shutdown).persistence(persistence).build()
@@ -1798,6 +1808,7 @@ def main():
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("xabar", broadcast))
     app.add_handler(CallbackQueryHandler(button))
+    app.add_error_handler(error_handler)
     print("✅ Bot ishga tushdi!")
     app.run_polling(drop_pending_updates=True)
 

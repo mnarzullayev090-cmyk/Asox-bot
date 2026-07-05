@@ -142,6 +142,15 @@ def find_seller_by_phone(phone):
             return uid, data
     return None
 
+def find_user_by_phone(phone):
+    target = normalize_phone(phone)
+    if not target:
+        return None
+    for uid, data in load_users().items():
+        if normalize_phone(data.get("phone", "")) == target:
+            return uid, data
+    return None
+
 def is_valid_phone(phone):
     digits = "".join(ch for ch in phone if ch.isdigit())
     return 7 <= len(digits) <= 15
@@ -222,6 +231,10 @@ TEXTS = {
             "👋 Assalomu alaykum!\n"
             "🛒 *ASOX Market* botiga xush kelibsiz!\n\n"
             "Quyidagi bo'limlardan birini tanlang:"
+        ),
+        "register_success": (
+            "✅ *Siz muvaffaqiyatli ro'yxatdan o'tdingiz!*\n\n"
+            "ASOX Market saytiga xush kelibsiz!"
         ),
         "about": (
             "ℹ️ *ASOX Market haqida*\n\n"
@@ -443,6 +456,10 @@ TEXTS = {
             "🛒 Добро пожаловать в бот *ASOX Market*!\n\n"
             "Выберите один из разделов:"
         ),
+        "register_success": (
+            "✅ *Вы успешно зарегистрированы!*\n\n"
+            "Добро пожаловать на сайт ASOX Market!"
+        ),
         "about": (
             "ℹ️ *Об ASOX Market*\n\n"
             "ASOX Market — премиум e-commerce платформа в Узбекистане.\n\n"
@@ -662,6 +679,10 @@ TEXTS = {
             "👋 Hello!\n"
             "🛒 Welcome to *ASOX Market* bot!\n\n"
             "Please choose a section:"
+        ),
+        "register_success": (
+            "✅ *You have successfully registered!*\n\n"
+            "Welcome to the ASOX Market website!"
         ),
         "about": (
             "ℹ️ *About ASOX Market*\n\n"
@@ -1798,13 +1819,48 @@ async def handle_order_notify(request):
 
     return web.json_response({"ok": True})
 
+async def handle_register_notify(request):
+    if not ORDER_API_KEY or request.headers.get("X-API-Key") != ORDER_API_KEY:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid json"}, status=400)
+
+    phone = str(data.get("phone", ""))
+    result = find_user_by_phone(phone)
+    if not result:
+        return web.json_response({"ok": False, "error": "user not found"}, status=404)
+
+    user_id, user = result
+    lang = user.get("lang", "uz")
+    text = TEXTS.get(lang, TEXTS["uz"]).get(
+        "register_success",
+        "✅ *Siz muvaffaqiyatli ro'yxatdan o'tdingiz!*\n\nASOX Market saytiga xush kelibsiz!"
+    )
+
+    bot_app = request.app["bot_app"]
+    try:
+        await bot_app.bot.send_message(chat_id=int(user_id), text=text, parse_mode="Markdown")
+    except Exception:
+        try:
+            await bot_app.bot.send_message(chat_id=int(user_id), text=text)
+        except Exception as e:
+            print(f"[REGISTER API] Foydalanuvchiga xabar yuborishda xato: {e}")
+            return web.json_response({"ok": False, "error": "send failed"}, status=500)
+
+    return web.json_response({"ok": True})
+
 async def start_order_api(app):
     if not ORDER_API_KEY:
         print("[ORDER API] ORDER_API_KEY sozlanmagan, API o'chirilgan.")
         return
     web_app = web.Application()
     web_app["bot_app"] = app
-    web_app.add_routes([web.post("/api/order-notify", handle_order_notify)])
+    web_app.add_routes([
+        web.post("/api/order-notify", handle_order_notify),
+        web.post("/api/register-notify", handle_register_notify),
+    ])
     runner = web.AppRunner(web_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", ORDER_API_PORT)
